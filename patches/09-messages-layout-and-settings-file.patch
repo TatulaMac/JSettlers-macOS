@@ -1,0 +1,123 @@
+diff --git a/go.graphics/src/main/java/go/graphics/Tweaks.java b/go.graphics/src/main/java/go/graphics/Tweaks.java
+index 20dc681..50ff443 100644
+--- a/go.graphics/src/main/java/go/graphics/Tweaks.java
++++ b/go.graphics/src/main/java/go/graphics/Tweaks.java
+@@ -2,8 +2,12 @@ package go.graphics;
+ 
+ import java.io.File;
+ import java.io.FileInputStream;
++import java.io.FileOutputStream;
+ import java.io.IOException;
+ import java.io.InputStream;
++import java.io.OutputStreamWriter;
++import java.io.Writer;
++import java.nio.charset.StandardCharsets;
+ import java.util.Properties;
+ 
+ /**
+@@ -24,23 +28,50 @@ public final class Tweaks {
+ 
+ 		if (fileValues == null) {
+ 			fileValues = new Properties();
+-			File file = new File("tweaks.properties");
++			loadFile();
++		}
++		return fileValues.getProperty(key);
++	}
++
++	/**
++	 * Loads the first existing settings file: tweaks.properties in the working directory, otherwise the one in the application folder on macOS.
++	 */
++	private static void loadFile() {
++		String home = System.getProperty("user.home", ".");
++		File[] candidates = {
++				new File("tweaks.properties"),
++				new File(home, "Library/Application Support/JSettlers/tweaks.properties"),
++		};
++		for (File file : candidates) {
+ 			if (file.isFile()) {
+ 				try (InputStream in = new FileInputStream(file)) {
+ 					fileValues.load(in);
++					report("settings read from " + file.getAbsolutePath() + ": " + fileValues);
+ 				} catch (IOException | RuntimeException e) {
+-					System.err.println("Could not read " + file.getAbsolutePath() + ": " + e);
++					report("could not read " + file.getAbsolutePath() + ": " + e);
+ 				}
++				return;
+ 			}
+ 		}
+-		return fileValues.getProperty(key);
++		report("no tweaks.properties found (working directory: " + new File(".").getAbsolutePath() + "), using defaults");
++	}
++
++	/**
++	 * Prints which settings file was used, also to tweaks-status.txt in the working directory so that the user can check it without a terminal.
++	 */
++	private static void report(String text) {
++		System.err.println("Tweaks: " + text);
++		try (Writer out = new OutputStreamWriter(new FileOutputStream("tweaks-status.txt"), StandardCharsets.UTF_8)) {
++			out.write(text + System.lineSeparator());
++		} catch (IOException | RuntimeException ignored) {
++		}
+ 	}
+ 
+ 	public static float getFloat(String key, float defaultValue, float min, float max) {
+ 		String value = get(key);
+ 		if (value == null) return defaultValue;
+ 		try {
+-			float parsed = Float.parseFloat(value.trim());
++			float parsed = Float.parseFloat(value.trim().replace(',', '.'));
+ 			if (parsed >= min && parsed <= max) return parsed;
+ 		} catch (NumberFormatException ignored) {
+ 		}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index 2d680b6..53ce710 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -164,7 +164,7 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 	/**
+ 	 * Distance between the right edge of the left side panel and the start of the message texts (setting message-offset-x).
+ 	 */
+-	private static final float MESSAGE_OFFSET_X = Tweaks.getFloat("message-offset-x", 24, -500, 2000);
++	private static final float MESSAGE_OFFSET_X = Tweaks.getFloat("message-offset-x", 50, -500, 2000);
+ 	private static final int MESSAGE_OFFSET_Y = 30;
+ 	private static final long GOTO_MARK_TIME = 1500;
+ 	private static final long DOUBLE_CLICK_TIME = 500;
+@@ -434,7 +434,7 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 	private float messageAlpha(IMessage m) {
+ 		int age = m.getAge();
+ 		return age < 1500
+-				? Math.min(1, age / 1000f)
++				? Math.min(1, age / 250f)
+ 				: Math.max(0, 1f - (float) age / IMessage.MESSAGE_TTL);
+ 	}
+ 
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
+index 7b18afe..c33bda9 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
+@@ -183,7 +183,8 @@ public class OriginalControls implements IControls {
+ 
+ 	@Override
+ 	public float getPanelWidth() {
+-		return uiBase.getPosition().getWidth();
++		// the lower part of the panel ends at the same x position that is used in containsPoint (the minimap decoration reaches further right above it)
++		return layoutProperties.miniMap.RIGHT_DECORATION_LEFT * uiBase.getPosition().getWidth();
+ 	}
+ 
+ 	@Override
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
+index d81dc28..3b73e13 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
+@@ -67,8 +67,8 @@ public class OccupyingBuilding extends Building implements IBuilding.IOccupied,
+ 	private static final long serialVersionUID = 5267249978497095473L;
+ 
+ 	private static final int TIMER_PERIOD = 500;
+-	/** Number of timer periods (500 ms each) without any soldier before the player is warned: 20 seconds. */
+-	private static final int NO_SOLDIER_WARNING_TICKS = 40;
++	/** Number of timer periods (500 ms each) without any soldier before the player is warned: 5 seconds. */
++	private static final int NO_SOLDIER_WARNING_TICKS = 10;
+ 	/** The warning is repeated after this many timer periods (2 minutes) while the building is still empty. */
+ 	private static final int NO_SOLDIER_WARNING_REPEAT_TICKS = 240;
+ 

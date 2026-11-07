@@ -1,0 +1,135 @@
+diff --git a/go.graphics.swing/src/main/java/go/graphics/swing/contextcreator/JOGLContextCreator.java b/go.graphics.swing/src/main/java/go/graphics/swing/contextcreator/JOGLContextCreator.java
+index 748f9b7..b49aaba 100644
+--- a/go.graphics.swing/src/main/java/go/graphics/swing/contextcreator/JOGLContextCreator.java
++++ b/go.graphics.swing/src/main/java/go/graphics/swing/contextcreator/JOGLContextCreator.java
+@@ -14,6 +14,10 @@
+  *******************************************************************************/
+ package go.graphics.swing.contextcreator;
+ 
++import java.util.concurrent.Executors;
++import java.util.concurrent.ScheduledExecutorService;
++import java.util.concurrent.TimeUnit;
++
+ import com.jogamp.opengl.GLAutoDrawable;
+ import com.jogamp.opengl.GLCapabilities;
+ import com.jogamp.opengl.GLContext;
+@@ -26,13 +30,58 @@ import go.graphics.swing.event.swingInterpreter.GOSwingEventConverter;
+ 
+ public class JOGLContextCreator extends ContextCreator<GLJPanel> implements GLEventListener {
+ 
++	/**
++	 * With a frame rate limit the frames are paced here with nanosecond precision. The coarse Swing timer (whole milliseconds, on macOS with a lot of
++	 * jitter) only reached about 52 frames per second at a limit of 60.
++	 */
++	private final ScheduledExecutorService framePacer = Executors.newSingleThreadScheduledExecutor(runnable -> {
++		Thread thread = new Thread(runnable, "frame pacer");
++		thread.setDaemon(true);
++		return thread;
++	});
++	private long nextFrameNanos = 0;
++	private volatile long lastDisplayNanos = 0;
++
+ 	public JOGLContextCreator(ContextContainer container, boolean debug) {
+ 		super(container, debug);
+ 	}
+ 
+ 	@Override
+ 	public void stop() {
++		framePacer.shutdownNow();
++	}
++
++	@Override
++	public void repaint() {
++		// With a frame rate limit the next frame is already scheduled after each frame. Requests of the outer timer are only used to restart the
++		// frames when none has been drawn for a while.
++		if (fpsLimit != 0 && lastDisplayNanos != 0 && System.nanoTime() - lastDisplayNanos < 250_000_000L) {
++			return;
++		}
++		super.repaint();
++	}
++
++	private void scheduleNextFrame() {
++		if (fpsLimit == 0) {
++			super.repaint();
++			return;
++		}
++
++		long interval = 1_000_000_000L / fpsLimit;
++		long now = System.nanoTime();
++		long base = (nextFrameNanos == 0 || now - nextFrameNanos > 2 * interval) ? now : nextFrameNanos;
++		nextFrameNanos = base + interval;
+ 
++		long delay = nextFrameNanos - now;
++		if (delay <= 200_000L) {
++			super.repaint();
++		} else {
++			try {
++				framePacer.schedule(() -> canvas.repaint(), delay, TimeUnit.NANOSECONDS);
++			} catch (RuntimeException ignored) {
++				// stopped
++			}
++		}
+ 	}
+ 
+ 	@Override
+@@ -60,10 +109,11 @@ public class JOGLContextCreator extends ContextCreator<GLJPanel> implements GLEv
+ 
+ 	@Override
+ 	public void display(GLAutoDrawable drawable) {
++		lastDisplayNanos = System.nanoTime();
+ 		try {
+ 			parent.draw();
+ 			parent.finishFrame();
+-			if(fpsLimit == 0) repaint();
++			scheduleNextFrame();
+ 		} catch(ContextException ignored) {}
+ 	}
+ 
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java b/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
+index f973bd6..2df6ae8 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
+@@ -60,6 +60,8 @@ public final class NetworkTimer extends TimerTask implements INetworkClientClock
+ 	private float progress = 0.0f;
+ 
+ 	private boolean scheduled = false;
++	/** System time (nanoseconds) of the previous call of {@link #run()}, 0 if there was none. */
++	private long lastRunNanos = 0;
+ 
+ 	private ITaskExecutor taskExecutor;
+ 	private DataOutputStream replayLogStream;
+@@ -80,7 +82,9 @@ public final class NetworkTimer extends TimerTask implements INetworkClientClock
+ 	public synchronized void startExecution() {
+ 		if (!scheduled) {
+ 			scheduled = true;
+-			timer.schedule(this, 0, TIME_SLICE);
++			// The timer thread wakes up more often than once per time slice and the game time is advanced by the real time that has passed. A fixed
++			// delay of TIME_SLICE would make every step a bit longer (on macOS about 10 %), so the game would run slower than the set speed.
++			timer.schedule(this, 0, TIME_SLICE / 5);
+ 		}
+ 	}
+ 
+@@ -94,16 +98,21 @@ public final class NetworkTimer extends TimerTask implements INetworkClientClock
+ 
+ 	@Override
+ 	public void run() {
++		long now = System.nanoTime();
++		// number of time slices that have passed since the last call (limited, so that a long stall does not cause a huge burst of steps)
++		float slices = lastRunNanos == 0 ? 0 : Math.min(4f, (now - lastRunNanos) / (TIME_SLICE * 1000000f));
++		lastRunNanos = now;
++
+ 		if (!isPausing) {
+ 			if (pauseTime <= 0) { // this is used for synchronizing the network clients
+-				progress += speedFactor;
++				progress += speedFactor * slices;
+ 
+ 				while (progress >= 1) {
+ 					executeRun();
+ 					progress--;
+ 				}
+ 			} else {
+-				pauseTime -= TIME_SLICE;
++				pauseTime -= Math.round(TIME_SLICE * slices);
+ 			}
+ 		}
+ 	}

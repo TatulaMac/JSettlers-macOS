@@ -1,0 +1,42 @@
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/military/MageMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/military/MageMovable.java
+index fdf4a7f..4101fc3 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/military/MageMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/military/MageMovable.java
+@@ -2,6 +2,7 @@ package jsettlers.logic.movable.military;
+ 
+ import java.util.ArrayDeque;
+ import java.util.ArrayList;
++import java.util.Arrays;
+ import java.util.Comparator;
+ import java.util.List;
+ import java.util.Queue;
+@@ -42,6 +43,11 @@ import static jsettlers.common.landscape.ELandscapeType.*;
+ 
+ public class MageMovable extends AttackableHumanMovable implements IMageMovable {
+ 
++	/** Materials that can appear with the spell "gifts of the gods": all droppable materials except the most valuable ones (gold, gems). */
++	private static final EMaterialType[] GIFT_MATERIALS = Arrays.stream(EMaterialType.DROPPABLE_MATERIALS)
++			.filter(type -> type != EMaterialType.GOLD && type != EMaterialType.GEMS)
++			.toArray(EMaterialType[]::new);
++
+ 	private static final long serialVersionUID = 1L;
+ 
+ 	private static final float ACTION1_DURATION = 1f;
+@@ -325,12 +331,13 @@ public class MageMovable extends AttackableHumanMovable implements IMageMovable
+ 			case GIFTS:
+ 				spellRegion(ESpellType.GIFTS_RADIUS).filter((x, y) -> !grid.isBlockedOrProtected(x, y))
+ 						.filter((x, y) -> teamId(x, y) == -1 || teamId(x, y) == teamId())
+-						.limit(MatchConstants.random().nextInt(ESpellType.GIFTS_MAX_STACKS+1))
++						// at least one stack, so that the mana is never spent for nothing
++						.limit(1 + MatchConstants.random().nextInt(ESpellType.GIFTS_MAX_STACKS))
+ 						.forEach((x, y) -> {
+ 							ShortPoint2D at = new ShortPoint2D(x, y);
+-							//TODO only give useful stuff
+-							EMaterialType type = EMaterialType.values()[MatchConstants.random().nextInt(EMaterialType.values().length)];
+-							int size = MatchConstants.random().nextInt(9);
++							// only materials that can really be dropped (the old code also picked e.g. NO_MATERIAL, which is invisible)
++							EMaterialType type = GIFT_MATERIALS[MatchConstants.random().nextInt(GIFT_MATERIALS.length)];
++							int size = 1 + MatchConstants.random().nextInt(8);
+ 							for(int i = 0; i != size; i++) grid.dropMaterial(at, type, true, false);
+ 							effectLocations.add(at);
+ 						});

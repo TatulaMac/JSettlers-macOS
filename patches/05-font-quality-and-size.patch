@@ -1,0 +1,248 @@
+diff --git a/go.graphics.swing/src/main/java/go/graphics/swing/text/LWJGLTextDrawer.java b/go.graphics.swing/src/main/java/go/graphics/swing/text/LWJGLTextDrawer.java
+index 54b6236..e6a75f0 100644
+--- a/go.graphics.swing/src/main/java/go/graphics/swing/text/LWJGLTextDrawer.java
++++ b/go.graphics.swing/src/main/java/go/graphics/swing/text/LWJGLTextDrawer.java
+@@ -15,27 +15,74 @@
+ package go.graphics.swing.text;
+ 
+ import go.graphics.GLDrawContext;
++import go.graphics.Tweaks;
+ import go.graphics.text.AbstractTextDrawer;
+ import go.graphics.text.EFontSize;
++import go.graphics.text.TextDrawer;
+ 
+ import java.awt.Color;
+ import java.awt.Font;
+ import java.awt.FontMetrics;
+ import java.awt.Graphics2D;
++import java.awt.GraphicsEnvironment;
+ import java.awt.RenderingHints;
+ import java.awt.Toolkit;
+ import java.awt.image.BufferedImage;
++import java.util.Arrays;
++import java.util.EnumMap;
++import java.util.HashSet;
++import java.util.Set;
+ 
+ public final class LWJGLTextDrawer extends AbstractTextDrawer<GLDrawContext> {
+ 	private static final int DEFAULT_DPI = 96;
+-	private static final Font FONT = new Font("Arial", Font.PLAIN, TEXTURE_GENERATION_SIZE);
++	private static final String FONT_FAMILY = chooseFontFamily();
++
++	/**
++	 * Makes all texts bigger (or smaller). Setting "font-scale" (see {@link Tweaks}).
++	 */
++	private static final float FONT_SCALE = Tweaks.getFloat("font-scale", 1.5f, 0.5f, 4f);
++
++	private final float guiScale;
++	private final EnumMap<EFontSize, LWJGLTextDrawer> sizedAtlases = new EnumMap<>(EFontSize.class);
++	private Font font;
++
++	/** Prefers the macOS system font look, falls back to Arial (and finally to the Java default sans serif font). */
++	private static String chooseFontFamily() {
++		try {
++			Set<String> families = new HashSet<>(Arrays.asList(GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames()));
++			for (String family : new String[] {"Helvetica Neue", "Arial"}) {
++				if (families.contains(family)) return family;
++			}
++		} catch (Throwable ignored) {
++		}
++		return Font.SANS_SERIF;
++	}
+ 
+ 	/**
+ 	 * Creates a new text drawer.
+ 	 *
+ 	 */
+ 	public LWJGLTextDrawer(GLDrawContext drawContext, float guiScale) {
+-		super(drawContext, guiScale);
++		this(drawContext, guiScale, null);
++	}
++
++	private LWJGLTextDrawer(GLDrawContext drawContext, float guiScale, EFontSize atlasSize) {
++		super(drawContext, guiScale, atlasSize);
++		this.guiScale = guiScale;
++	}
++
++	/**
++	 * Every font size gets its own glyph texture rendered directly in the final pixel size. That is much sharper than scaling down one big texture.
++	 */
++	@Override
++	public TextDrawer derive(EFontSize size) {
++		if (atlasSize != null) return super.derive(size);
++		return sizedAtlases.computeIfAbsent(size, s -> new LWJGLTextDrawer(drawContext, guiScale, s)).derive(size);
++	}
++
++	private Font createFont() {
++		float pixelSize = atlasSize == null ? TEXTURE_GENERATION_SIZE : Math.max(1f, atlasSize.getSize() * scalingFactor * FONT_SCALE);
++		return new Font(FONT_FAMILY, Font.PLAIN, 1).deriveFont(pixelSize);
+ 	}
+ 
+ 	@Override
+@@ -51,14 +98,16 @@ public final class LWJGLTextDrawer extends AbstractTextDrawer<GLDrawContext> {
+ 		tmp_graph.setRenderingHint(
+ 				RenderingHints.KEY_TEXT_ANTIALIASING,
+ 				RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+-		tmp_graph.setFont(FONT);
++		tmp_graph.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
++		font = createFont();
++		tmp_graph.setFont(font);
+ 		FontMetrics fm = tmp_graph.getFontMetrics();
+ 		for(int i = 0;i != CHARACTER_COUNT; i++) char_widths[i] = fm.charWidth(CHARACTERS.charAt(i));
+ 		gentex_line_height = fm.getHeight();
+ 
+ 		EFontSize[] values = EFontSize.values();
+ 		for(int i = 0; i != values.length; i++) {
+-			tmp_graph.setFont(FONT.deriveFont(values[i].getSize()));
++			tmp_graph.setFont(font.deriveFont(values[i].getSize()));
+ 			heightPerSize[i] = tmp_graph.getFontMetrics().getHeight();
+ 		}
+ 
+@@ -69,7 +118,23 @@ public final class LWJGLTextDrawer extends AbstractTextDrawer<GLDrawContext> {
+ 
+ 	@Override
+ 	protected int[] getRGB() {
+-		return pre_render.getRGB(0, 0, tex_width, tex_height, null, 0, tex_width);
++		int[] pixels = pre_render.getRGB(0, 0, tex_width, tex_height, null, 0, tex_width);
++		// The glyphs were drawn white on black. Convert them to white pixels whose alpha is derived from the brightness.
++		//  - The game uploads textures as RGBA (red in the highest byte), not as ARGB like Java: so the color has to be packed as 0xRRGGBBAA.
++		//    (Using ARGB mixes up the channels and gives a cyan fringe around the text.)
++		//  - The shader discards every pixel with alpha < 0.5, so the soft edge of the glyphs is mapped to the alpha range 0.5-1.0 and very faint
++		//    pixels are dropped. That gives smooth edges without a halo.
++		for (int i = 0; i < pixels.length; i++) {
++			int p = pixels[i];
++			int coverage = (((p >> 16) & 0xFF) + ((p >> 8) & 0xFF) + (p & 0xFF)) / 3;
++			if (coverage < 64) {
++				pixels[i] = 0; // fully transparent pixels must be black, otherwise a box is drawn around every glyph
++			} else {
++				int alpha = 128 + (coverage - 64) * 127 / 191;
++				pixels[i] = 0xFFFFFF00 | alpha;
++			}
++		}
++		return pixels;
+ 	}
+ 
+ 	private BufferedImage pre_render;
+@@ -77,13 +142,16 @@ public final class LWJGLTextDrawer extends AbstractTextDrawer<GLDrawContext> {
+ 
+ 	@Override
+ 	protected void setupBitmapDraw() {
+-		pre_render = new BufferedImage(tex_width, tex_height, BufferedImage.TYPE_INT_ARGB);
++		pre_render = new BufferedImage(tex_width, tex_height, BufferedImage.TYPE_INT_RGB);
+ 		graph = pre_render.createGraphics();
++		graph.setColor(Color.BLACK);
++		graph.fillRect(0, 0, tex_width, tex_height);
+ 		graph.setRenderingHint(
+ 				RenderingHints.KEY_TEXT_ANTIALIASING,
+ 				RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
++		graph.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS, RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+ 		graph.setColor(Color.WHITE);
+-		graph.setFont(FONT);
++		graph.setFont(font);
+ 	}
+ 
+ 	@Override
+diff --git a/go.graphics/src/main/java/go/graphics/Tweaks.java b/go.graphics/src/main/java/go/graphics/Tweaks.java
+new file mode 100644
+index 0000000..20dc681
+--- /dev/null
++++ b/go.graphics/src/main/java/go/graphics/Tweaks.java
+@@ -0,0 +1,50 @@
++package go.graphics;
++
++import java.io.File;
++import java.io.FileInputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.util.Properties;
++
++/**
++ * Small user adjustable settings (text size, tooltip position, ...).
++ * <p>
++ * A value is read from the java system property "settlers.&lt;key&gt;" or from the file "tweaks.properties" in the working directory of the game
++ * (on macOS: ~/Library/Application Support/JSettlers/tweaks.properties). The game must be restarted after changing the file.
++ */
++public final class Tweaks {
++	private static Properties fileValues;
++
++	private Tweaks() {
++	}
++
++	private static synchronized String get(String key) {
++		String value = System.getProperty("settlers." + key);
++		if (value != null) return value;
++
++		if (fileValues == null) {
++			fileValues = new Properties();
++			File file = new File("tweaks.properties");
++			if (file.isFile()) {
++				try (InputStream in = new FileInputStream(file)) {
++					fileValues.load(in);
++				} catch (IOException | RuntimeException e) {
++					System.err.println("Could not read " + file.getAbsolutePath() + ": " + e);
++				}
++			}
++		}
++		return fileValues.getProperty(key);
++	}
++
++	public static float getFloat(String key, float defaultValue, float min, float max) {
++		String value = get(key);
++		if (value == null) return defaultValue;
++		try {
++			float parsed = Float.parseFloat(value.trim());
++			if (parsed >= min && parsed <= max) return parsed;
++		} catch (NumberFormatException ignored) {
++		}
++		System.err.println("Ignoring invalid value '" + value + "' of setting " + key);
++		return defaultValue;
++	}
++}
+diff --git a/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java b/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java
+index bba4f50..ca34e24 100644
+--- a/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java
++++ b/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java
+@@ -63,7 +63,14 @@ public abstract class AbstractTextDrawer<T extends GLDrawContext> {
+ 
+ 	protected static final int TEXTURE_GENERATION_SIZE = 30;
+ 
+-	private final float scalingFactor;
++	protected final float scalingFactor;
++
++	/**
++	 * If not null, the glyph texture of this drawer is rendered directly in the pixel size of this font size (including the scaling factor), so that
++	 * the text is drawn 1:1 without scaling the glyphs (which makes small text blurry/jagged). If null, the glyphs are rendered with
++	 * {@link #TEXTURE_GENERATION_SIZE} and scaled for every size.
++	 */
++	protected final EFontSize atlasSize;
+ 
+ 	private UnifiedDrawHandle geometry;
+ 	protected TextureHandle font_tex;
+@@ -82,7 +89,12 @@ public abstract class AbstractTextDrawer<T extends GLDrawContext> {
+ 	 *
+ 	 */
+ 	public AbstractTextDrawer(T drawContext, float guiScale) {
++		this(drawContext, guiScale, null);
++	}
++
++	public AbstractTextDrawer(T drawContext, float guiScale, EFontSize atlasSize) {
+ 		this.drawContext = drawContext;
++		this.atlasSize = atlasSize;
+ 		scalingFactor = guiScale <= 0.51f ? calculateScalingFactor() : guiScale;
+ 
+ 		int descent = init();
+@@ -183,7 +195,13 @@ public abstract class AbstractTextDrawer<T extends GLDrawContext> {
+ 		private final float lineHeight;
+ 
+ 		private SizedTextDrawer(EFontSize size) {
+-			lineHeight = heightPerSize[size.ordinal()]*scalingFactor;
++			if (atlasSize == null) {
++				lineHeight = heightPerSize[size.ordinal()]*scalingFactor;
++			} else if (atlasSize == size) {
++				lineHeight = gentex_line_height; // glyphs are already rendered in the final size => draw them 1:1
++			} else {
++				lineHeight = gentex_line_height*size.getSize()/atlasSize.getSize();
++			}
+ 			widthFactor = lineHeight/gentex_line_height;
+ 		}
+ 

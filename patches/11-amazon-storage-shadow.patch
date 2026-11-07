@@ -1,0 +1,28 @@
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/MapObjectDrawer.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/MapObjectDrawer.java
+index 10cc924..1b19833 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/MapObjectDrawer.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/MapObjectDrawer.java
+@@ -1349,8 +1349,22 @@ public class MapObjectDrawer {
+ 			} else if(variant.isVariantOf(EBuildingType.STOCK)) {
+ 				float[] zvalues = new float[] {-4*z_per_y, -2*z_per_y, 2*z_per_y, 3*z_per_y, 2*z_per_y, -2*z_per_y};
+ 				ImageLink[] images = variant.getImages();
++				// Every part of the storage carries the shadow of the whole building. Drawn six times on top of each other the translucent shadow
++				// becomes a solid black area, so only the last part that has a shadow draws it.
++				int shadowPart = 0;
+ 				for (int i = 0; i != 6; i++) {
+-					draw(imageProvider.getImage(images[i]), x, y, zvalues[i], color);
++					Image part = imageProvider.getImage(images[i]);
++					if (part instanceof SettlerImage && ((SettlerImage) part).getShadow() != null) {
++						shadowPart = i;
++					}
++				}
++				for (int i = 0; i != 6; i++) {
++					Image part = imageProvider.getImage(images[i]);
++					if (i == shadowPart) {
++						draw(part, x, y, zvalues[i], color);
++					} else {
++						drawOnlyImage(part, x, y, zvalues[i], null, color);
++					}
+ 				}
+ 			} else {
+ 				ImageLink[] images = variant.getImages();

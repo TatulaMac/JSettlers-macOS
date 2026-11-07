@@ -1,0 +1,60 @@
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/constants/Constants.java b/jsettlers.logic/src/main/java/jsettlers/logic/constants/Constants.java
+index bb3445a..a4183dc 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/constants/Constants.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/constants/Constants.java
+@@ -56,6 +56,12 @@ public final class Constants {
+ 	 */
+ 	public static final short SOLDIER_SEARCH_RADIUS = 30;
+ 
++	/**
++	 * The radius within soldiers attack non-military enemy units (geologists, pioneers, ...) on their own. Further away they ignore them, so that a
++	 * single passing geologist can not lure a whole army away.
++	 */
++	public static final short SOLDIER_CIVILIAN_SEARCH_RADIUS = 3;
++
+ 	public static final short DEFAULT_ATTACK_RADIUS = 1;
+ 
+ 	public static final short PIKEMAN_ATTACK_RADIUS = 2;
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
+index e8a6b18..1cfd28c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
+@@ -1578,15 +1578,22 @@ public final class MainGrid implements Serializable {
+ 												final short maxSearchRadius, final boolean includeTowers) {
+ 			boolean isBowman = searchingAttackable.getMovableType().isBowman();
+ 
+-			IAttackable enemy = searchEnemyInArea(position, searchingAttackable.getPlayer(), minSearchRadius, maxSearchRadius, isBowman, includeTowers);
++			// Soldiers must not run across the map after passers-by (e.g. geologists or pioneers); they only react to non-military units when these are close.
++			boolean ignoreFarCivilians = EMovableType.SOLDIERS.contains(searchingAttackable.getMovableType());
++
++			IAttackable enemy = searchEnemyInArea(position, searchingAttackable.getPlayer(), minSearchRadius, maxSearchRadius, isBowman, includeTowers, ignoreFarCivilians);
+ 			if (includeTowers && !isBowman && enemy == null) {
+-				enemy = searchEnemyInArea(position, searchingAttackable.getPlayer(), maxSearchRadius, Constants.TOWER_ATTACKABLE_SEARCH_RADIUS, false, true);
++				enemy = searchEnemyInArea(position, searchingAttackable.getPlayer(), maxSearchRadius, Constants.TOWER_ATTACKABLE_SEARCH_RADIUS, false, true, ignoreFarCivilians);
+ 			}
+ 
+ 			return enemy;
+ 		}
+ 
+-		private IAttackable searchEnemyInArea(final ShortPoint2D position, final IPlayer searchingPlayer, final short minSearchRadius, final short maxSearchRadius, boolean isBowman, boolean includeTowers) {
++		private boolean isMilitary(EMovableType type) {
++			return EMovableType.SOLDIERS.contains(type) || type == EMovableType.MAGE;
++		}
++
++		private IAttackable searchEnemyInArea(final ShortPoint2D position, final IPlayer searchingPlayer, final short minSearchRadius, final short maxSearchRadius, boolean isBowman, boolean includeTowers, boolean ignoreFarCivilians) {
+ 			int minDistance = Integer.MAX_VALUE;
+ 			IAttackable result = null;
+ 
+@@ -1617,6 +1624,12 @@ public final class MainGrid implements Serializable {
+ 
+ 
+ 				int attackDistance = attackable.getPosition().getOnGridDistTo(position);
++
++				if(ignoreFarCivilians && attackDistance > Constants.SOLDIER_CIVILIAN_SEARCH_RADIUS && attackable instanceof IAttackableMovable
++						&& !isMilitary(attackable.getMovableType())) {
++					continue;
++				}
++
+ 				if(attackDistance < minDistance) {
+ 					minDistance = attackDistance;
+ 					result = attackable;

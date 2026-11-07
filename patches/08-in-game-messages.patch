@@ -1,0 +1,311 @@
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
+index 84285a5..0a42c57 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
+@@ -36,5 +36,10 @@ public enum EMessageType {
+ 	/**
+ 	 * The worker of a building was not able to find a place to execute his action in his work are for some time.
+ 	 */
+-	NOTHING_FOUND_IN_SEARCH_AREA
++	NOTHING_FOUND_IN_SEARCH_AREA,
++
++	/**
++	 * A military building has been finished but no soldier is available to occupy it.
++	 */
++	NO_SOLDIER_AVAILABLE
+ }
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+index f805b43..80baee1 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+@@ -139,6 +139,17 @@ public class SimpleMessage implements IMessage {
+ 		return new SimpleMessage(EMessageType.NOTHING_FOUND_IN_SEARCH_AREA, "cannot_find_work_" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
+ 	}
+ 
++	/**
++	 * Create a new message that a military building has no soldier available to occupy it.
++	 *
++	 * @param building
++	 * 		The building
++	 * @return The message object
++	 */
++	public static IMessage noSoldierAvailable(IBuilding building) {
++		return new SimpleMessage(EMessageType.NO_SOLDIER_AVAILABLE, "no_soldier_available_" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
++	}
++
+ 	/**
+ 	 *
+ 	 * @param at
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index 247a98c..2d680b6 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -16,9 +16,12 @@ package jsettlers.graphics.map;
+ 
+ import java.io.PrintWriter;
+ import java.io.StringWriter;
++import java.util.ArrayList;
+ import java.util.BitSet;
+ 
+ import go.graphics.EPrimitiveType;
++import java.util.List;
++import java.util.Locale;
+ import java.util.Optional;
+ 
+ import java.util.Set;
+@@ -69,6 +72,7 @@ import jsettlers.common.menu.IStartedGame;
+ import jsettlers.common.menu.UIState;
+ import jsettlers.common.action.EMoveToType;
+ import jsettlers.common.action.MoveToAction;
++import jsettlers.common.menu.messages.EMessageType;
+ import jsettlers.common.menu.messages.IMessage;
+ import jsettlers.common.movable.IGraphicsMovable;
+ import jsettlers.common.player.IPlayer;
+@@ -157,7 +161,10 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 
+ 	private static final int SCREEN_PADDING = 50;
+ 	private static final float OVERDRAW_BOTTOM_PX = 50;
+-	private static final float MESSAGE_OFFSET_X = 300;
++	/**
++	 * Distance between the right edge of the left side panel and the start of the message texts (setting message-offset-x).
++	 */
++	private static final float MESSAGE_OFFSET_X = Tweaks.getFloat("message-offset-x", 24, -500, 2000);
+ 	private static final int MESSAGE_OFFSET_Y = 30;
+ 	private static final long GOTO_MARK_TIME = 1500;
+ 	private static final long DOUBLE_CLICK_TIME = 500;
+@@ -443,10 +450,81 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 		drawer.drawString((windowWidth - drawer.getWidth(msg)) / 2, windowHeight - 7 * EFontSize.HEADLINE.getSize(), color, msg);
+ 	}
+ 
++	/**
++	 * Screen areas of the messages drawn last (x, y, width, height), used to jump to the message position on click.
++	 */
++	private volatile MessageArea[] messageAreas = new MessageArea[0];
++
++	private static final class MessageArea {
++		private final float x;
++		private final float y;
++		private final float width;
++		private final float height;
++		private final ShortPoint2D position;
++
++		private MessageArea(float x, float y, float width, float height, ShortPoint2D position) {
++			this.x = x;
++			this.y = y;
++			this.width = width;
++			this.height = height;
++			this.position = position;
++		}
++
++		private boolean contains(UIPoint point) {
++			return point.getX() >= x && point.getX() <= x + width && point.getY() >= y && point.getY() <= y + height;
++		}
++	}
++
++	private static String capitalizeWords(String key) {
++		String text = key.replace('_', ' ').trim().toLowerCase(Locale.ENGLISH);
++		return text.isEmpty() ? key : Character.toUpperCase(text.charAt(0)) + text.substring(1);
++	}
++
++	private static String buildingNameOf(String buildingType) {
++		String name = Labels.getString("building_" + buildingType);
++		return name.equals("building_" + buildingType) ? capitalizeWords(buildingType) : name;
++	}
++
++	/**
++	 * Gets the readable text of a message. Messages whose text is missing in the language files get a readable text made from their key instead of
++	 * showing the raw key.
++	 */
++	private static String getMessageText(IMessage m) {
++		String label = m.getMessageLabel();
++		String text = Labels.getString(label);
++		if (m.getType() == EMessageType.CHAT || !text.equals(label)) {
++			return text;
++		}
++		if (label.startsWith("cannot_find_work_")) {
++			return buildingNameOf(label.substring("cannot_find_work_".length())) + ": no work found in its work area.";
++		} else if (label.startsWith("no_soldier_available_")) {
++			return buildingNameOf(label.substring("no_soldier_available_".length())) + " has no soldier to occupy it.";
++		} else if (label.startsWith("minerals_")) {
++			return "A geologist found " + capitalizeWords(label.substring("minerals_".length())).toLowerCase(Locale.ENGLISH) + ".";
++		}
++		return capitalizeWords(label);
++	}
++
++	private static Color getMessageColor(IMessage m, float alpha) {
++		switch (m.getType()) {
++		case ATTACKED:
++			return new Color(1f, 0.45f, 0.35f, alpha);
++		case NOTHING_FOUND_IN_SEARCH_AREA:
++		case NO_SOLDIER_AVAILABLE:
++			return new Color(1f, 0.8f, 0.3f, alpha);
++		case MINERALS:
++			return new Color(0.6f, 1f, 0.6f, alpha);
++		default:
++			return new Color(1, 1, 1, alpha);
++		}
++	}
++
+ 	private void drawMessages(GLDrawContext gl) {
+ 		EFontSize fontSize = EFontSize.HEADLINE;
+ 		TextDrawer drawer = textDrawer.getTextDrawer(gl, fontSize);
+ 		messenger.doTick();
++		float lineHeight = Math.max(fontSize.getSize() * 1.3f, drawer.getHeight("X") * 1.35f);
++		List<MessageArea> areas = new ArrayList<>();
+ 
+ 		float offsetY;
+ 		float offsetX;
+@@ -454,7 +532,7 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 		int messageIndex;
+ 		if(textDrawPosition == ETextDrawPosition.DESKTOP) {
+ 			offsetY = MESSAGE_OFFSET_Y;
+-			offsetX = MESSAGE_OFFSET_X;
++			offsetX = controls.getPanelWidth() + MESSAGE_OFFSET_X;
+ 			yDirection = 1;
+ 			messageIndex = 0;
+ 		} else {
+@@ -466,8 +544,9 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 
+ 		for (IMessage m : messenger.getMessages()) {
+ 			float x = offsetX;
+-			float y = offsetY + messageIndex * (fontSize.getSize()*1.3f) * yDirection;
++			float y = offsetY + messageIndex * lineHeight * yDirection;
+ 			float a = messageAlpha(m);
++			float startX = x;
+ 			if (m.getSender() >= 0) {
+ 				String name = getPlayername(m.getSender()) + ":";
+ 				Color color = MapDrawContext.getPlayerColor(m.getSender());
+@@ -479,10 +558,15 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 				x += width + 10;
+ 			}
+ 
+-			drawer.drawString(x, y, new Color(1, 1, 1, a), Labels.getString(m.getMessageLabel()));
++			String text = getMessageText(m);
++			drawer.drawString(x, y, getMessageColor(m, a), text);
++			if (m.getPosition() != null) {
++				areas.add(new MessageArea(startX, y - lineHeight * 0.2f, x - startX + drawer.getWidth(text), lineHeight, m.getPosition()));
++			}
+ 
+ 			messageIndex++;
+ 		}
++		messageAreas = areas.toArray(new MessageArea[0]);
+ 	}
+ 
+ 	private String getPlayername(byte sender) {
+@@ -888,6 +972,15 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 
+ 	private Optional<Action> getActionForCommand(GOCommandEvent commandEvent) {
+ 		UIPoint position = commandEvent.getCommandPosition();
++		if (commandEvent.isSelecting()) {
++			for (MessageArea area : messageAreas) {
++				if (area.contains(position)) {
++					// a click on a message text shows the place the message is about
++					scrollTo(area.position, true);
++					return Optional.empty();
++				}
++			}
++		}
+ 		if (controls.containsPoint(position)) {
+ 			if (commandEvent.isSelecting()) {
+ 				return controls.getActionForSelect(position);
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/IControls.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/IControls.java
+index 70a2723..3582ff8 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/IControls.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/IControls.java
+@@ -63,6 +63,15 @@ public interface IControls extends IMapInterfaceListener {
+ 	 */
+ 	boolean containsPoint(UIPoint position);
+ 
++	/**
++	 * Gets the width of the user interface panel that covers the left side of the screen.
++	 *
++	 * @return The width in pixels, 0 if there is no such panel.
++	 */
++	default float getPanelWidth() {
++		return 0;
++	}
++
+ 	/**
+ 	 * Gets the description for a given point, e.g. for tooltipps. May be called for any position.
+ 	 *
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
+index 092b2f3..7b18afe 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
+@@ -181,6 +181,11 @@ public class OriginalControls implements IControls {
+ 				* uiBase.getPosition().getHeight();
+ 	}
+ 
++	@Override
++	public float getPanelWidth() {
++		return uiBase.getPosition().getWidth();
++	}
++
+ 	@Override
+ 	public boolean containsPoint(UIPoint position) {
+ 		float width = uiBase.getPosition().getWidth();
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 470af44..9dbf08e 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -379,6 +379,11 @@ cannot_find_work_FARM = Your grain farm can't find find enough spots to plant wh
+ cannot_find_work_WINEGROWER = Your winery can't find enough spots for growing vines in its work area.
+ cannot_find_work_WATERWORKS = Your waterworks can't find any river in its work area.
+ cannot_find_work_FISHER = Your fisher can't find any sea in its work area.
++cannot_find_work_RICE_FARM = Your rice farm can't find enough spots to plant rice in its work area.
++cannot_find_work_BEEKEEPING = Your beekeeper can't find enough free spots for beehives in its work area.
++no_soldier_available_TOWER = Your guard tower can't be occupied: no soldier is available.
++no_soldier_available_BIG_TOWER = Your large guard tower can't be occupied: no soldier is available.
++no_soldier_available_CASTLE = Your castle can't be occupied: no soldier is available.
+ action_firerer_slow = Warning! The game is responding slowly.
+ 
+ # progress display
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
+index 3d10b59..d81dc28 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
+@@ -67,6 +67,10 @@ public class OccupyingBuilding extends Building implements IBuilding.IOccupied,
+ 	private static final long serialVersionUID = 5267249978497095473L;
+ 
+ 	private static final int TIMER_PERIOD = 500;
++	/** Number of timer periods (500 ms each) without any soldier before the player is warned: 20 seconds. */
++	private static final int NO_SOLDIER_WARNING_TICKS = 40;
++	/** The warning is repeated after this many timer periods (2 minutes) while the building is still empty. */
++	private static final int NO_SOLDIER_WARNING_REPEAT_TICKS = 240;
+ 
+ 	private final LinkedList<OccupierPlace> emptyPlaces = new LinkedList<>();
+ 	private final SoldierRequests searchedSoldiers = new SoldierRequests();
+@@ -78,6 +82,7 @@ public class OccupyingBuilding extends Building implements IBuilding.IOccupied,
+ 	private DijkstraContinuableRequest dijkstraRequest;
+ 
+ 	private boolean occupiedArea;
++	private int unoccupiedTicks = 0;
+ 	private float doorHealth = 50f;
+ 	private boolean inFight = false;
+ 	private AttackableTowerMapObject attackableTowerObject = null;
+@@ -176,9 +181,25 @@ public class OccupyingBuilding extends Building implements IBuilding.IOccupied,
+ 		increaseDoorHealth();
+ 		releaseNextSoldierIfNeeded();
+ 		searchSoldiersIfNeeded();
++		warnIfNoSoldierAvailable();
+ 		return TIMER_PERIOD;
+ 	}
+ 
++	/**
++	 * Tells the player when this building has been waiting for its first soldier for a long time (nobody in reach to occupy it).
++	 */
++	private void warnIfNoSoldierAvailable() {
++		if (sortedOccupiers.isEmpty() && comingSoldiers.isEmpty() && !searchedSoldiers.isEmpty()) {
++			unoccupiedTicks++;
++			if (unoccupiedTicks == NO_SOLDIER_WARNING_TICKS
++					|| (unoccupiedTicks > NO_SOLDIER_WARNING_TICKS && (unoccupiedTicks - NO_SOLDIER_WARNING_TICKS) % NO_SOLDIER_WARNING_REPEAT_TICKS == 0)) {
++				getPlayer().showMessage(SimpleMessage.noSoldierAvailable(this));
++			}
++		} else {
++			unoccupiedTicks = 0;
++		}
++	}
++
+ 	private void increaseDoorHealth() {
+ 		if (doorHealth < 1 && !inFight) {
+ 			doorHealth = Math.min(1, doorHealth + Constants.TOWER_DOOR_REGENERATION);

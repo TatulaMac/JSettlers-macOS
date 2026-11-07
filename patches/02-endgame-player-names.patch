@@ -1,0 +1,177 @@
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/PartitionsGrid.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/PartitionsGrid.java
+index c44dcf1..e5aeb11 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/PartitionsGrid.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/PartitionsGrid.java
+@@ -99,6 +99,8 @@ public final class PartitionsGrid implements Serializable, IScheduledTimerable {
+ 				teams.computeIfAbsent(playerSetting.getTeamId(), Team::new);
+ 				Team team = teams.get(playerSetting.getTeamId());
+ 				this.players[playerId] = new Player(playerId, team, (byte) playerSettings.length, playerSetting.getPlayerType(), playerSetting.getCivilisation());
++				this.players[playerId].setDisplayType(playerSetting.getDisplayType());
++				this.players[playerId].setDisplayName(playerSetting.getDisplayName());
+ 				team.registerPlayer(this.players[playerId]);
+ 				this.blockedPartitionsForPlayers[playerId] = createNewPartition(playerId); // create a blocked partition for every player
+ 				players[playerId].scheduleTasks();
+@@ -118,6 +120,8 @@ public final class PartitionsGrid implements Serializable, IScheduledTimerable {
+ 		for (int i = 0; i < players.length; i++) {
+ 			if (players[i] != null && playerSettings[i].isAvailable()) {
+ 				players[i].setPlayerType(playerSettings[i].getPlayerType());
++				players[i].setDisplayType(playerSettings[i].getDisplayType());
++				players[i].setDisplayName(playerSettings[i].getDisplayName());
+ 				players[i].setCivilisation(playerSettings[i].getCivilisation());
+ 			}
+ 		}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/player/EndgameStatistic.java b/jsettlers.logic/src/main/java/jsettlers/logic/player/EndgameStatistic.java
+index 5ebe08a..a6565c3 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/player/EndgameStatistic.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/player/EndgameStatistic.java
+@@ -50,7 +50,11 @@ public class EndgameStatistic implements IEndgameStatistic, Serializable {
+ 
+ 	@Override
+ 	public String getName() {
+-		return player.getPlayerType().toString();
++		String name = player.getDisplayName();
++		if (player.getDisplayType() == EPlayerType.HUMAN && name != null && !name.trim().isEmpty()) {
++			return name;
++		}
++		return String.valueOf(player.getDisplayType());
+ 	}
+ 
+ 	@Override
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/player/Player.java b/jsettlers.logic/src/main/java/jsettlers/logic/player/Player.java
+index 353532a..8414573 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/player/Player.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/player/Player.java
+@@ -55,6 +55,8 @@ public class Player implements Serializable, IMessenger, IInGamePlayer, IOffersC
+ 	private ECivilisation civilisation;
+ 
+ 	private transient EPlayerType               playerType;
++	private transient EPlayerType               displayType;
++	private transient String                    displayName;
+ 	private transient CombatStrengthInformation combatStrengthInfo = new CombatStrengthInformation();
+ 	private transient IMessenger                messenger;
+ 
+@@ -172,6 +174,25 @@ public class Player implements Serializable, IMessenger, IInGamePlayer, IOffersC
+ 		return civilisation;
+ 	}
+ 
++	/**
++	 * @return the type to show to the user (differs from {@link #getPlayerType()} on multiplayer clients, where AI players are treated as human).
++	 */
++	public EPlayerType getDisplayType() {
++		return displayType != null ? displayType : playerType;
++	}
++
++	public String getDisplayName() {
++		return displayName;
++	}
++
++	public void setDisplayName(String displayName) {
++		this.displayName = displayName;
++	}
++
++	public void setDisplayType(EPlayerType displayType) {
++		this.displayType = displayType;
++	}
++
+ 	public void setPlayerType(EPlayerType playerType) {
+ 		this.playerType = playerType;
+ 	}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/player/PlayerSetting.java b/jsettlers.logic/src/main/java/jsettlers/logic/player/PlayerSetting.java
+index 5ad0a62..384557c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/player/PlayerSetting.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/player/PlayerSetting.java
+@@ -38,6 +38,10 @@ public class PlayerSetting {
+ 	private final Byte teamId;
+ 	private final ECivilisation civilisation;
+ 	private final EPlayerType playerType;
++	/** Only for display (e.g. end-game statistics). Not serialized. If null, {@link #playerType} is used. */
++	private EPlayerType displayType;
++	/** Only for display (e.g. end-game statistics): name of a human player. Not serialized. */
++	private String displayName;
+ 
+ 	/**
+ 	 * Creates a new {@link PlayerSetting} object for a human player.
+@@ -94,6 +98,28 @@ public class PlayerSetting {
+ 		return civilisation;
+ 	}
+ 
++	/**
++	 * @return the type that should be shown to the user. On multiplayer clients all slots are {@link EPlayerType#HUMAN} for the game logic (the AI
++	 * only runs on the host), but the real type of the slot is still known and is shown here.
++	 */
++	public EPlayerType getDisplayType() {
++		return displayType != null ? displayType : playerType;
++	}
++
++	public String getDisplayName() {
++		return displayName;
++	}
++
++	public PlayerSetting withDisplayName(String displayName) {
++		this.displayName = displayName;
++		return this;
++	}
++
++	public PlayerSetting withDisplayType(EPlayerType displayType) {
++		this.displayType = displayType;
++		return this;
++	}
++
+ 	@Override
+ 	public String toString() {
+ 		return "PlayerSetting{" +
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+index 779743f..4951097 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+@@ -150,9 +150,9 @@ public class MultiplayerGame {
+ 				.map(slot -> {
+ 					PlayerSetting playerSetting;
+ 					if(iAmTheHost) {
+-						playerSetting = new PlayerSetting(slot.getType(), slot.getCivilisation(), slot.getTeam());
++						playerSetting = new PlayerSetting(slot.getType(), slot.getCivilisation(), slot.getTeam()).withDisplayName(playerNameOf(slot));
+ 					} else {
+-						playerSetting = new PlayerSetting(EPlayerType.HUMAN, slot.getCivilisation(), slot.getTeam());
++						playerSetting = new PlayerSetting(EPlayerType.HUMAN, slot.getCivilisation(), slot.getTeam()).withDisplayType(slot.getType()).withDisplayName(playerNameOf(slot));
+ 					}
+ 
+ 					return Map.entry(slot.getPosition(), playerSetting);
+@@ -160,6 +160,10 @@ public class MultiplayerGame {
+ 		return IntStream.range(0, maxPlayers).mapToObj(i -> playerSettings.computeIfAbsent((byte) i, v -> new PlayerSetting())).toArray(PlayerSetting[]::new);
+ 	}
+ 
++	private static String playerNameOf(IMultiplayerSlot slot) {
++		return slot.getPlayer() != null ? slot.getPlayer().getName() : null;
++	}
++
+ 	private byte calculateOwnPlayerId() {
+ 		String myId = networkClient.getPlayerInfo().getId();
+ 		for (IMultiplayerSlot currSlot : slotList.getItems()) {
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index 6d58ca2..5d03de4 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -229,7 +229,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 					.map(playerSlot -> {
+ 						if (playerSlot.isAvailable()) {
+ 							return new PlayerSetting(playerSlot.getPlayerType(), playerSlot.getCivilisation(),
+-									playerSlot.getTeam());
++									playerSlot.getTeam()).withDisplayName(playerSlot.getPlayerName());
+ 						} else {
+ 							return new PlayerSetting();
+ 						}
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+index 046b3b7..c1b6258 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+@@ -211,6 +211,10 @@ public class PlayerSlot {
+ 		for(ECivilisation civ : ECivilisation.values()) civilisationComboBox.addItem(new CivilisationUiWrapper(civ));
+ 	}
+ 
++	public String getPlayerName() {
++		return playerNameLabel.getText();
++	}
++
+ 	public void setPlayerName(String playerName) {
+ 		playerNameLabel.setText(playerName);
+ 	}

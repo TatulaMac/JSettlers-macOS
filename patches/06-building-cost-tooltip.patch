@@ -1,0 +1,58 @@
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/buildings/BuildingButton.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/buildings/BuildingButton.java
+index 75e420c..0df42f1 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/buildings/BuildingButton.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/buildings/BuildingButton.java
+@@ -17,7 +17,12 @@ package jsettlers.graphics.map.controls.original.panel.content.buildings;
+ import go.graphics.GLDrawContext;
+ import go.graphics.text.EFontSize;
+ 
++import java.util.EnumMap;
++import java.util.Map;
++
+ import jsettlers.common.buildings.BuildingVariant;
++import jsettlers.common.buildings.stacks.ConstructionStack;
++import jsettlers.common.material.EMaterialType;
+ import jsettlers.common.images.EImageLinkType;
+ import jsettlers.common.images.ImageLink;
+ import jsettlers.common.images.OriginalImageLink;
+@@ -58,12 +63,39 @@ public class BuildingButton extends Button implements UiContentUpdater.IUiConten
+ 	private final Label constructedLabel = new Label("", EFontSize.SMALL, EHorizontalAlignment.RIGHT, EVerticalAlignment.TOP);
+ 
+ 	public BuildingButton(BuildingVariant building) {
+-		super(new ShowConstructionMarksAction(building.getType()), null, null, Labels.getName(building.getType()));
++		super(new ShowConstructionMarksAction(building.getType()), null, null, createDescription(building));
+ 		this.building = building;
+ 		buildingImageLink = building.getGuiImage();
+ 		addChild(constructedLabel, 0.05f, 0.05f, .95f, .95f);
+ 	}
+ 
++	/**
++	 * Tooltip text: the name of the building and, in the second line, the materials needed to build it (e.g. "Plank: 2, Stone: 3").
++	 */
++	private static String createDescription(BuildingVariant building) {
++		String name = Labels.getName(building.getType());
++		try {
++			Map<EMaterialType, Integer> costs = new EnumMap<>(EMaterialType.class);
++			for (ConstructionStack stack : building.getConstructionStacks()) {
++				if (stack.requiredForBuild() > 0) {
++					costs.merge(stack.getMaterialType(), (int) stack.requiredForBuild(), Integer::sum);
++				}
++			}
++			if (costs.isEmpty()) return name;
++
++			StringBuilder text = new StringBuilder(name).append('\n');
++			boolean first = true;
++			for (Map.Entry<EMaterialType, Integer> cost : costs.entrySet()) {
++				if (!first) text.append(", ");
++				text.append(Labels.getName(cost.getKey(), false)).append(": ").append(cost.getValue());
++				first = false;
++			}
++			return text.toString();
++		} catch (RuntimeException e) {
++			return name; // the cost is only additional information
++		}
++	}
++
+ 	@Override
+ 	public void drawAt(GLDrawContext gl) {
+ 		drawBackground(gl);
