@@ -1,0 +1,40 @@
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index feac693..f421148 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -643,6 +643,11 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 
+ 			x -= fps.length() * letterWidth;
+ 			drawer.drawString(x, yFirstLine, fps);
++
++			// current zoom, left of the frame rate (100% = zoom factor 1, one image pixel per screen pixel)
++			String zoomString = Labels.getString("map-zoom", Math.round(context.getScreen().getZoom() * 100));
++			x -= (zoomString.length() + 1) * letterWidth;
++			drawer.drawString(x, yFirstLine, zoomString);
+ 		}
+ 	}
+ 
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index c7a749f..d97e521 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -439,6 +439,7 @@ movable_BREWER = Sládek
+ # Gets hours, minutes, seconds
+ map-time = Čas: %d:%02d:%02d
+ map-fps = FPS: %.1f Rychlost: %.1fx
++map-zoom = Měřítko: %d%%
+ 
+ # Start screen
+ 
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 58428f9..e8d0ef5 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -445,6 +445,7 @@ movable_BREWER = Brewer
+ # Gets hours, minutes, seconds
+ map-time = Time: %d:%02d:%02d
+ map-fps = FPS: %.1f Speed: %.1fx
++map-zoom = Zoom: %d%%
+ 
+ # Start screen
+ 

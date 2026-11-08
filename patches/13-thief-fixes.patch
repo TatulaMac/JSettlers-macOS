@@ -1,0 +1,105 @@
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
+index 1cfd28c..fbd6efb 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
+@@ -1589,6 +1589,19 @@ public final class MainGrid implements Serializable {
+ 			return enemy;
+ 		}
+ 
++		/**
++		 * A thief on the ground of the searching player's team is stealing from it, so soldiers react to it from the full distance (unlike other
++		 * non-military units that are only attacked when they are close).
++		 */
++		private boolean isThiefOnGroundOf(IAttackable attackable, IPlayer player) {
++			if (attackable.getMovableType() != EMovableType.THIEF) {
++				return false;
++			}
++			ShortPoint2D thiefPosition = attackable.getPosition();
++			Player owner = partitionsGrid.getPlayerAt(thiefPosition.x, thiefPosition.y);
++			return owner != null && owner.getTeamId() == player.getTeamId();
++		}
++
+ 		private boolean isMilitary(EMovableType type) {
+ 			return EMovableType.SOLDIERS.contains(type) || type == EMovableType.MAGE;
+ 		}
+@@ -1626,7 +1639,7 @@ public final class MainGrid implements Serializable {
+ 				int attackDistance = attackable.getPosition().getOnGridDistTo(position);
+ 
+ 				if(ignoreFarCivilians && attackDistance > Constants.SOLDIER_CIVILIAN_SEARCH_RADIUS && attackable instanceof IAttackableMovable
+-						&& !isMilitary(attackable.getMovableType())) {
++						&& !isMilitary(attackable.getMovableType()) && !isThiefOnGroundOf(attackable, searchingPlayer)) {
+ 					continue;
+ 				}
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java
+index de16fdd..952cc6d 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java
+@@ -33,6 +33,11 @@ public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThi
+ 
+ 	private ShortPoint2D returnPos = null;
+ 
++	/**
++	 * The last position the thief was ordered from while it was on its own ground. The stolen material is carried back here.
++	 */
++	private ShortPoint2D homePos = null;
++
+ 	public ThiefMovable(AbstractMovableGrid grid, ShortPoint2D position, Player player, Movable movable) {
+ 		super(grid, EMovableType.THIEF, position, player, movable);
+ 	}
+@@ -50,12 +55,17 @@ public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThi
+ 						mov.currentTarget = null;
+ 						mov.returnPos = null;
+ 
++						// remember where to bring the stolen material to (an order given on enemy ground must not make this position the destination)
++						if (mov.homePos == null || mov.isOnOwnGround()) {
++							mov.homePos = mov.position;
++						}
++
+ 						// steal something
+ 						if(mov.nextMoveToType.isWorkOnDestination() && mov.getMaterial() == EMaterialType.NO_MATERIAL) {
+ 							Path dijkstraPath = mov.grid.searchDijkstra(mov, mov.nextTarget.x, mov.nextTarget.y, (short) 30, ESearchType.FOREIGN_MATERIAL);
+ 							if (dijkstraPath != null) {
+ 								mov.currentTarget = dijkstraPath.getTargetPosition();
+-								mov.returnPos = mov.position;
++								mov.returnPos = mov.homePos;
+ 							}
+ 						}
+ 						if(mov.currentTarget == null) {
+@@ -75,7 +85,12 @@ public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThi
+ 					)
+ 				),
+ 				guard(mov -> (mov.getMaterial() != EMaterialType.NO_MATERIAL && mov.isOnOwnGround()),
+-					action(ThiefMovable::dropMaterialIfPossible)
++					action(mov -> {
++						mov.dropMaterialIfPossible();
++						// one stolen good per order: wait for the next order now
++						mov.currentTarget = null;
++						mov.returnPos = null;
++					})
+ 				),
+ 				guard(mov -> mov.currentTarget != null,
+ 					sequence(
+@@ -85,12 +100,18 @@ public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThi
+ 						),
+ 						selector(
+ 							condition(mov -> mov.getMaterial() != EMaterialType.NO_MATERIAL),
+-							sequence(
++							selector(
++								sequence(
++									stealMaterial(),
++									// Carry the stolen material home. This must be set AFTER the stealing: the go-to-target guard above has a higher priority than
++									// this branch, so setting it before aborted the stealing while it was still running (the thief walked back and forth and never took anything).
++									action(mov -> mov.goToTarget = mov.returnPos)
++								),
++								// nothing (left) to steal here: give up and go back
+ 								action(mov -> {
+-									// 
++									mov.currentTarget = null;
+ 									mov.goToTarget = mov.returnPos;
+-								}),
+-								stealMaterial()
++								})
+ 							)
+ 						)
+ 					)

@@ -6,7 +6,7 @@
 > This project is not affiliated with, endorsed by or supported by Ubisoft, Blue Byte or the upstream JSettlers project.
 > The game data (graphics and sound) of *The Settlers III* is **not included** - you need your own copy (see below).
 
-Current version: **0.6.0-alpha** (alpha: expect bugs; saved games may become invalid in future versions).
+Current version: **0.6.1-alpha** (alpha: expect bugs; saved games may become invalid in future versions).
 See the [changelog](CHANGELOG.md) for everything that differs from upstream.
 
 ## What you need
@@ -17,7 +17,7 @@ See the [changelog](CHANGELOG.md) for everything that differs from upstream.
   Tested with the GOG version 1.60 data.
 
 ## Installation
-1. Download `JSettlers-macOS-v0.6.0-alpha-arm64.dmg` from the [Releases](../../releases) page.
+1. Download `JSettlers-macOS-v0.6.1-alpha-arm64.dmg` from the [Releases](../../releases) page.
 2. Open the DMG and drag **JSettlers** to the **Applications** folder.
 3. Start JSettlers. macOS may say the app is damaged or from an unidentified developer. It is not signed by Apple (it is signed ad hoc),
    so you have to allow it once. Do **one** of these:
@@ -43,8 +43,18 @@ Everything the game writes is in `~/Library/Application Support/JSettlers`:
 | `message-offset-x` | 50 | distance of the in-game messages from the right edge of the left panel in pixels |
 | `jvm-options` | (off) | experimental Java options |
 
+## Language
+The game starts in **English**. To change the language open **Settings** in the main menu, choose a language in the **Language** list and click OK;
+the menus switch immediately, no restart is needed. Available languages: **English** and **Czech (Cestina)**.
+Texts that are not translated are shown in English. Translations are plain text files
+(`labels_xx.properties`); contributions of other languages are welcome (see the [changelog](CHANGELOG.md) of 0.6.1).
+
 ## Tips
-- `Ctrl` + right click (on a Mac: Control + two-finger click) = forced move that ignores enemies; `Alt` + right click = patrol.
+- **Control + two-finger click** (the secondary click of your trackpad; with a mouse: Control + right click) = forced move: the selected units walk
+  there and ignore enemies on the way (recall).
+- **Option + two-finger click** = patrol between the current position and the clicked position.
+- A plain two-finger click on a spot is the normal move command. A thief ordered next to a pile of enemy goods steals it and carries it home.
+- The **zoom** is shown at the top right, left of the frame rate (100% = original size, one image pixel per screen pixel).
 - Click on a message at the bottom of the screen to jump to the place it is about.
 - LAN game: the host opens the LAN tab, clicks "Start local server" and creates a game; the others see it in the list.
   All players must use the same version.
@@ -57,8 +67,8 @@ and the version shown in the top right corner of the game.
 ## What is different from upstream?
 This build is [PR #92](https://github.com/paulwedeck/settlers-remake/pull/92) (Apple Silicon support, commit `47d1d4e`) plus the patches in
 [`patches`](patches), listed in the [changelog](CHANGELOG.md): LAN multiplayer on macOS, readable bigger text, building costs in the build menu,
-useful messages, correct game speed, better soldier behavior, fixes for the "Gifts of the gods" spell, end-of-game statistics and
-the Amazon storage building.
+useful messages, correct game speed, better soldier behavior, fixes for the "Gifts of the gods" spell, end-of-game statistics,
+the Amazon storage building and a language selection (English, Czech).
 
 ## Building it yourself
 You need a Mac with Apple Silicon, git, Xcode command line tools and JDK 17 (`brew install --cask temurin@17`).

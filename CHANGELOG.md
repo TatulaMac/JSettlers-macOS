@@ -4,6 +4,45 @@ All notable changes of **JSettlers macOS** compared to upstream
 [settlers-remake](https://github.com/paulwedeck/settlers-remake) are listed here, newest version first.
 The version numbers are specific to this macOS build; upstream does not number its versions (it only shows the git commit).
 
+## [0.6.1-alpha] - language selection, thieves, zoom indicator
+
+Same upstream base as 0.6.0-alpha ([PR #92](https://github.com/paulwedeck/settlers-remake/pull/92), commit `47d1d4e`).
+New patches: `12-language-selection-czech.patch`, `13-thief-fixes.patch`, `14-zoom-indicator.patch`.
+
+### Fixed
+- **Thieves never stole anything** (patch 13): a thief ordered to steal walked to the pile, started to take a good and aborted the action by itself after
+  a moment to walk back home empty-handed, then repeated this forever. The "go home" order was set *before* the stealing instead of after it, and that
+  order has a higher priority than the stealing. Now the thief takes one good, carries it back to its own ground, drops it there and waits for the next
+  order. If the pile is empty when it arrives, it walks back. A thief ordered from enemy ground no longer takes that spot as its home.
+- **Soldiers did not notice thieves** (patch 13): since patch 04 of 0.6.0 (soldiers only attack non-military units within 3 fields) swordsmen and
+  pikemen noticed a thief only when it was 3 fields away. A thief standing on the ground of the soldier's team is now attacked from the full distance.
+  (Archers still ignore thieves until another soldier has hit them - that is how the game was designed.)
+
+### Added
+- **Zoom indicator** (patch 14): the current zoom is shown at the top right of the game screen, left of the frame rate, version and time
+  (e.g. `Zoom: 100%`, in Czech `Měřítko: 100%`). 100% is the original size. It makes it easy to get back to the normal view after zooming in or out.
+- **Language selection** (patch 12): *Settings* in the main menu has a new **Language** list. The menus are rebuilt when the language is changed,
+  so no restart is needed. Available: **English** (default) and **Czech**. The choice is saved in the game settings (setting `locale`).
+  Switching back works completely: the score table after a game and the map filter buttons (e.g. *Imported*) are translated again as well
+  (they used to keep the texts of the previous language).
+- **Complete Czech translation** (`labels_cs.properties`, all 480+ texts): menus, buildings, materials, settlers, spells, messages, tooltips, dialogs.
+  Texts that are missing in a translation fall back to English.
+- **Czech characters in the in-game font**: the glyph atlas of the in-game text (messages, tooltips, panels) now contains
+  the letters ě š č ř ž ý á í é ú ů ď ť ň and their capitals; before, they were not drawn.
+- **Fixed a glyph texture bug** (patch 12): the quads of the characters in the last line of the glyph texture reached below the texture, so the bottom
+  pixel row was stretched into a solid block under letters with a flat bottom (e.g. z, e, u). It was invisible before because those lines contained
+  only rarely used characters.
+- To add another language: add `labels_xx.properties` next to `labels_en.properties` and one entry in `GameLanguage.java`.
+
+### Changed
+- Documentation: the control hints are written for the Mac now (Control + two-finger click = forced move / recall, Option + two-finger click = patrol).
+- **English is now always the default language.** Before, the language of the computer was used when a matching translation existed (de, es, pl, ...).
+  Those translations are still in the game (incomplete, English fallback) but are not offered in the language list yet.
+  An advanced user can still set `locale=de` (any language code) in the game settings file.
+- English texts: fixed typos (e.g. "Summon Sto", "Irrigate dessert", "Musicvolume", "recruted soldiers", "Metalurgist"), added the missing texts of
+  the settings (GUI scale, AI tower focus) and of the server editor (username). The settings entries "timerless redraw" and "system default" are
+  translatable now.
+
 ## [0.6.0-alpha] - first public release
 
 Based on [PR #92](https://github.com/paulwedeck/settlers-remake/pull/92) of upstream (Apple Silicon support), commit `47d1d4e`.
