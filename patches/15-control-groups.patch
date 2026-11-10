@@ -1,0 +1,314 @@
+diff --git a/go.graphics.swing/src/main/java/go/graphics/swing/contextcreator/GLFWContextCreator.java b/go.graphics.swing/src/main/java/go/graphics/swing/contextcreator/GLFWContextCreator.java
+index 3c19034..9b6ae5d 100644
+--- a/go.graphics.swing/src/main/java/go/graphics/swing/contextcreator/GLFWContextCreator.java
++++ b/go.graphics.swing/src/main/java/go/graphics/swing/contextcreator/GLFWContextCreator.java
+@@ -179,6 +179,10 @@ public class GLFWContextCreator extends AsyncContextCreator {
+ 				}
+ 			}
+ 
++			if(mod != null) {
++				return; // a modifier key alone is no key event, it would block the next key (e.g. Control + 1) until it is released
++			}
++
+ 			if(action == GLFW.GLFW_PRESS) {
+ 				startKeyEvent(name);
+ 			} else if(action == GLFW.GLFW_RELEASE){
+diff --git a/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java b/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java
+index 25271b4..859fdf9 100644
+--- a/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java
++++ b/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java
+@@ -62,6 +62,11 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 
+ 	private int modifiers;
+ 
++	/**
++	 * The component that receives the keyboard events.
++	 */
++	private final Component component;
++
+ 	/**
+ 	 * Creates a new event converter, that converts swing events to go events.
+ 	 * 
+@@ -72,6 +77,7 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 	 */
+ 	public GOSwingEventConverter(Component component, GOEventHandlerProvider provider) {
+ 		super(provider);
++		this.component = component;
+ 		this.scaleFactor = () -> {
+ 			AffineTransform trans = component.getGraphicsConfiguration().getDefaultTransform();
+ 			return (trans != null) ? trans.getScaleX() : 1.0;
+@@ -89,6 +95,15 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 		addReplaceRule(new EventReplacementRule(ReplacableEvent.PAN, Replacement.COMMAND_ACTION, MOUSE_TIME_TRSHOLD, MOUSE_MOVE_TRESHOLD));
+ 	}
+ 
++	/**
++	 * Nothing else gives the keyboard focus to the game screen (a click on a canvas does not do that by itself), so no key was received at all.
++	 */
++	private void requestKeyboardFocus() {
++		if (!component.hasFocus()) {
++			component.requestFocusInWindow();
++		}
++	}
++
+ 	private UIPoint convertToLocal(MouseEvent e) {
+ 		return new UIPoint(e.getX() * scaleFactor.get(), (e.getComponent().getHeight() - e.getY()) * scaleFactor.get());
+ 
+@@ -97,6 +112,7 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 	@Override
+ 	public void mouseEntered(MouseEvent e) {
+ 		updateModifiers(e);
++		requestKeyboardFocus();
+ 		startHover(convertToLocal(e));
+ 	}
+ 
+@@ -120,6 +136,7 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 	@Override
+ 	public void mousePressed(MouseEvent e) {
+ 		updateModifiers(e);
++		requestKeyboardFocus();
+ 		int mouseButton = e.getButton();
+ 		UIPoint local = convertToLocal(e);
+ 		if (mouseButton == MouseEvent.BUTTON1) {
+@@ -160,6 +177,9 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 	@Override
+ 	public void keyPressed(KeyEvent e) {
+ 		updateModifiers(e);
++		if (isModifierKey(e)) {
++			return; // a modifier key alone is no key event, it would block the next key (e.g. Control + 1) until it is released
++		}
+ 		String text = getKeyName(e);
+ 		startKeyEvent(text);
+ 		/*
+@@ -261,9 +281,18 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 	@Override
+ 	public void keyReleased(KeyEvent e) {
+ 		updateModifiers(e);
++		if (isModifierKey(e)) {
++			return;
++		}
+ 		endKeyEvent(getKeyName(e));
+ 	}
+ 
++	private static boolean isModifierKey(KeyEvent e) {
++		int code = e.getKeyCode();
++		return code == KeyEvent.VK_CONTROL || code == KeyEvent.VK_SHIFT || code == KeyEvent.VK_ALT || code == KeyEvent.VK_ALT_GRAPH
++				|| code == KeyEvent.VK_META;
++	}
++
+ 	@Override
+ 	public void keyTyped(KeyEvent e) {
+ 	}
+diff --git a/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java b/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java
+index fc1a84e..eb00550 100644
+--- a/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java
++++ b/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java
+@@ -210,6 +210,17 @@ public class AbstractEventConverter {
+ 	}
+ 
+ 	protected synchronized void startKeyEvent(String string) {
++		if (string == null) {
++			return;
++		}
++		if (string.length() == 1 && string.charAt(0) >= '0' && string.charAt(0) <= '9' && getCurrentModifiers().contains(EModifier.CTRL)) {
++			// Control + digit is a different key than the digit alone (control groups)
++			string = "CTRL+" + string;
++		}
++		char lastChar = string.charAt(string.length() - 1);
++		if (lastChar >= '0' && lastChar <= '9') {
++			System.out.println("key pressed: " + string); // helps to find out whether the control group keys arrive
++		}
+ 		if (ongoingKeyEvent == null) {
+ 			ongoingKeyEvent = new GOKeyEvent(string);
+ 			replaceKeyEvent(ongoingKeyEvent);
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+index 8d990a8..5f7931c 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+@@ -113,6 +113,20 @@ public enum EActionType {
+ 	 */
+ 	SHOW_SELECTION,
+ 
++	/**
++	 * Stores the current selection in a control group (Control + 0..9).
++	 *
++	 * @see GroupAction
++	 */
++	ASSIGN_GROUP,
++
++	/**
++	 * Selects the units of a control group again (0..9).
++	 *
++	 * @see GroupAction
++	 */
++	RECALL_GROUP,
++
+ 	/**
+ 	 * Sets the screen to display current message.
+ 	 */
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/GroupAction.java b/jsettlers.common/src/main/java/jsettlers/common/action/GroupAction.java
+new file mode 100644
+index 0000000..e8adc61
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/GroupAction.java
+@@ -0,0 +1,27 @@
++package jsettlers.common.action;
++
++/**
++ * Action for the control groups: {@link EActionType#ASSIGN_GROUP} and {@link EActionType#RECALL_GROUP}.
++ */
++public class GroupAction extends Action {
++
++	/** Number of groups (keys 1 to 9 and 0). */
++	public static final int GROUP_COUNT = 10;
++
++	private final int group;
++
++	/**
++	 * @param actionType
++	 *            {@link EActionType#ASSIGN_GROUP} or {@link EActionType#RECALL_GROUP}
++	 * @param group
++	 *            The number of the group, 0 to {@link #GROUP_COUNT} - 1 (the number on the key).
++	 */
++	public GroupAction(EActionType actionType, int group) {
++		super(actionType);
++		this.group = group;
++	}
++
++	public int getGroup() {
++		return group;
++	}
++}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index f421148..12cbde8 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -49,6 +49,7 @@ import jsettlers.common.CommitInfo;
+ import jsettlers.common.CommonConstants;
+ import jsettlers.common.action.Action;
+ import jsettlers.common.action.EActionType;
++import jsettlers.common.action.GroupAction;
+ import jsettlers.common.action.IAction;
+ import jsettlers.common.action.PointAction;
+ import jsettlers.common.action.ScreenChangeAction;
+@@ -924,6 +925,12 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 			return new Action(EActionType.DESTROY);
+ 		} else if ("ESCAPE".equalsIgnoreCase(keyCode)) {
+ 			return new Action(EActionType.ABORT);
++		} else if (keyCode != null && keyCode.length() == 1 && keyCode.charAt(0) >= '0' && keyCode.charAt(0) <= '9') {
++			// 0..9: select a control group
++			return new GroupAction(EActionType.RECALL_GROUP, keyCode.charAt(0) - '0');
++		} else if (keyCode != null && keyCode.length() == 6 && keyCode.startsWith("CTRL+") && keyCode.charAt(5) >= '0' && keyCode.charAt(5) <= '9') {
++			// Control + 0..9: store the selection in a control group
++			return new GroupAction(EActionType.ASSIGN_GROUP, keyCode.charAt(5) - '0');
+ 		} else {
+ 			return null;
+ 		}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+index d407a20..de0f737 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+@@ -14,6 +14,7 @@
+  */
+ package jsettlers.input;
+ 
++import java.util.ArrayList;
+ import java.util.Comparator;
+ import java.util.EnumSet;
+ import java.util.LinkedList;
+@@ -32,6 +33,7 @@ import jsettlers.common.CommonConstants;
+ import jsettlers.common.action.BuildAction;
+ import jsettlers.common.action.CastSpellAction;
+ import jsettlers.common.action.ChangeTradingRequestAction;
++import jsettlers.common.action.GroupAction;
+ import jsettlers.common.action.ConvertAction;
+ import jsettlers.common.action.EActionType;
+ import jsettlers.common.action.EMoveToType;
+@@ -131,6 +133,21 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 	 */
+ 	private SelectionSet currentSelection = new SelectionSet();
+ 
++	/**
++	 * The control groups (Control + 0..9 stores the selection, 0..9 selects it). Only used by the user interface, so they are not part of the game
++	 * state and are not saved.
++	 */
++	private final List<IGuiMovable>[] controlGroups = newControlGroups();
++
++	@SuppressWarnings("unchecked")
++	private static List<IGuiMovable>[] newControlGroups() {
++		final List<IGuiMovable>[] groups = new List[GroupAction.GROUP_COUNT];
++		for (int i = 0; i < groups.length; i++) {
++			groups[i] = new ArrayList<>();
++		}
++		return groups;
++	}
++
+ 	public GuiInterface(IMapInterfaceConnector connector, IGameClock clock, ITaskScheduler taskScheduler, IGuiInputGrid grid, IGameStoppable gameStoppable, byte playerId, boolean multiplayer) {
+ 		this.connector = connector;
+ 		this.clock = clock;
+@@ -285,6 +302,14 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 				showSelection();
+ 				break;
+ 
++			case ASSIGN_GROUP:
++				assignGroup(((GroupAction) action).getGroup());
++				break;
++
++			case RECALL_GROUP:
++				recallGroup(((GroupAction) action).getGroup());
++				break;
++
+ 			case SCREEN_CHANGE:
+ 				constructionMarksCalculator.setScreen(((ScreenChangeAction) action).getScreenArea());
+ 				break;
+@@ -570,6 +595,51 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 		}
+ 	}
+ 
++	/**
++	 * Stores the movables of the current selection in the given control group (and removes them from every other group, a unit is only member of one
++	 * group). An empty selection empties the group. Buildings are not stored, the selection is left as it is in that case.
++	 */
++	private void assignGroup(int group) {
++		if (group < 0 || group >= controlGroups.length || (currentSelection.getSelectionType() == ESelectionType.BUILDING && !currentSelection.isEmpty())) {
++			return;
++		}
++
++		final List<IGuiMovable> members = new ArrayList<>();
++		for (final ISelectable selectable : currentSelection) {
++			if (selectable instanceof IGuiMovable) {
++				members.add((IGuiMovable) selectable);
++			}
++		}
++		// a unit is only member of one group: the last one it was added to
++		for (final List<IGuiMovable> otherGroup : controlGroups) {
++			otherGroup.removeAll(members);
++		}
++		controlGroups[group] = members;
++	}
++
++	/**
++	 * Selects the members of the given control group that are still alive (and still ours). The selection is not changed if nobody is left.
++	 */
++	private void recallGroup(int group) {
++		if (group < 0 || group >= controlGroups.length) {
++			return;
++		}
++
++		final List<IGuiMovable> members = new ArrayList<>();
++		for (final IGuiMovable member : controlGroups[group]) {
++			if (!(member instanceof IGraphicsMovable) || ((IGraphicsMovable) member).isAlive()) {
++				if (canSelectPlayer(member.getPlayer())) {
++					members.add(member);
++				}
++			}
++		}
++		controlGroups[group] = members; // forget the dead ones
++
++		if (!members.isEmpty()) {
++			setSelection(new SelectionSet(members));
++		}
++	}
++
+ 	private void showSelection() {
+ 		int x = 0;
+ 		int y = 0;

@@ -1,22 +1,31 @@
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/MapObjectDrawer.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/MapObjectDrawer.java
-index 10cc924..1b19833 100644
+index 10cc924..8f25f5b 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/MapObjectDrawer.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/MapObjectDrawer.java
-@@ -1349,8 +1349,22 @@ public class MapObjectDrawer {
+@@ -1321,6 +1321,8 @@ public class MapObjectDrawer {
+ 	 * @param color
+ 	 * 		Gray color shade
+ 	 */
++	private boolean marketplaceLogged = false;
++
+ 	private void drawBuilding(int x, int y, IBuilding building, float color) {
+ 		BuildingVariant variant = building.getBuildingVariant();
+ 
+@@ -1349,14 +1351,50 @@ public class MapObjectDrawer {
  			} else if(variant.isVariantOf(EBuildingType.STOCK)) {
  				float[] zvalues = new float[] {-4*z_per_y, -2*z_per_y, 2*z_per_y, 3*z_per_y, 2*z_per_y, -2*z_per_y};
  				ImageLink[] images = variant.getImages();
 +				// Every part of the storage carries the shadow of the whole building. Drawn six times on top of each other the translucent shadow
 +				// becomes a solid black area, so only the last part that has a shadow draws it.
 +				int shadowPart = 0;
- 				for (int i = 0; i != 6; i++) {
--					draw(imageProvider.getImage(images[i]), x, y, zvalues[i], color);
++				for (int i = 0; i != 6; i++) {
 +					Image part = imageProvider.getImage(images[i]);
 +					if (part instanceof SettlerImage && ((SettlerImage) part).getShadow() != null) {
 +						shadowPart = i;
 +					}
 +				}
-+				for (int i = 0; i != 6; i++) {
+ 				for (int i = 0; i != 6; i++) {
+-					draw(imageProvider.getImage(images[i]), x, y, zvalues[i], color);
 +					Image part = imageProvider.getImage(images[i]);
 +					if (i == shadowPart) {
 +						draw(part, x, y, zvalues[i], color);
@@ -26,3 +35,45 @@ index 10cc924..1b19833 100644
  				}
  			} else {
  				ImageLink[] images = variant.getImages();
++
++				// Like the storage, the two parts of a marketplace carry (nearly) the same shadow of the whole building. Drawn on top of each other
++				// the translucent shadows add up to a solid black area, so only the first part (the base, it has the larger shadow and is drawn behind
++				// the building) draws its shadow.
++				int shadowPart = -1;
++				if (variant.isVariantOf(EBuildingType.MARKET_PLACE)) {
++					shadowPart = 0;
++					if (!marketplaceLogged) {
++						marketplaceLogged = true;
++						for (int i = 0; i < images.length; i++) {
++							Image part = imageProvider.getImage(images[i]);
++							System.out.println("marketplace part " + i + ": " + part.getClass().getSimpleName() + ", shadow: "
++									+ (part instanceof SettlerImage ? String.valueOf(((SettlerImage) part).getShadow() != null) : "n/a"));
++						}
++					}
++				}
++
+ 				if (images.length > 0) {
+ 					Image image = imageProvider.getImage(images[0]);
+-					draw(image, x, y, building.getBuildingVariant().isVariantOf(EBuildingType.MARKET_PLACE) ? BACKGROUND_Z : 0, null, color);
++					float z = building.getBuildingVariant().isVariantOf(EBuildingType.MARKET_PLACE) ? BACKGROUND_Z : 0;
++					if (shadowPart == -1 || shadowPart == 0) {
++						draw(image, x, y, z, null, color);
++					} else {
++						drawOnlyImage(image, x, y, z, null, color);
++					}
+ 				}
+ 
+ 				byte fow = visibleGrid != null ? visibleGrid[x][y] : CommonConstants.FOG_OF_WAR_VISIBLE;
+@@ -1367,7 +1405,11 @@ public class MapObjectDrawer {
+ 
+ 				for (int i = 1; i < images.length; i++) {
+ 					Image image = imageProvider.getImage(images[i]);
+-					draw(image, x, y, tower_front_offset, color);
++					if (shadowPart == -1 || shadowPart == i) {
++						draw(image, x, y, tower_front_offset, color);
++					} else {
++						drawOnlyImage(image, x, y, tower_front_offset, null, color);
++					}
+ 				}
+ 			}
+ 		} else if (state >= .01f) {

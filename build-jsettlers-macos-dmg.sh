@@ -10,8 +10,8 @@
 #
 # What the script needs: a Mac with Apple Silicon, git, JDK 17 (brew install --cask temurin@17) and an internet
 # connection (Gradle downloads the dependencies). The results are placed in:
-#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.1-alpha-arm64.dmg       (the app, this is what users download)
-#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.1-alpha-source.zip      (complete, already patched source code)
+#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.2-alpha-arm64.dmg       (the app, this is what users download)
+#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.2-alpha-source.zip      (complete, already patched source code)
 #
 # How it works: it downloads the upstream source code (https://github.com/paulwedeck/settlers-remake, the state of
 # pull request #92 "Apple Silicon support", commit 47d1d4e), applies the patches embedded below (the same patches
@@ -19,7 +19,7 @@
 #
 set -euo pipefail
 
-RELEASE_VERSION="0.6.1-alpha"   # shown in the game (window title and top right corner) and used in the file names
+RELEASE_VERSION="0.6.2-alpha"   # shown in the game (window title and top right corner) and used in the file names
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -93,6 +93,8 @@ find . -name CommitInfo.java -path "*generated*" -delete   # make sure the label
 # 12 Language selection in Settings (English default, Czech) with a complete Czech translation, Czech characters in the in-game font.
 # 13 Thieves: stealing was aborted by the thief itself (it never took anything); soldiers notice thieves on their own ground from afar.
 # 14 Zoom indicator ("Zoom: 100%") left of the frame rate, version and time at the top right of the screen.
+# 15 Control groups: Control + 1..0 stores the selected units (soldiers, thieves, pioneers, geologists, ...), 1..0 selects them again.
+# 16 Peace time: selectable (10-60 minutes) when a game is created; countdown at the top right; nobody attacks until it is over.
 say "Applying the patches"
 mkdir -p "$WORK/patches"
 cat > "$WORK/patches/01-lan-multiplayer-broadcast.patch" <<'PATCH_EOF'
@@ -840,6 +842,20 @@ index 75e420c..0df42f1 100644
  	@Override
  	public void drawAt(GLDrawContext gl) {
  		drawBackground(gl);
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/warriors/WarriorsPanel.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/warriors/WarriorsPanel.java
+index 8f0f6d4..fc879d9 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/warriors/WarriorsPanel.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/warriors/WarriorsPanel.java
+@@ -184,6 +184,9 @@ public class WarriorsPanel extends AbstractContentProvider {
+ 
+ 		@Override
+ 		public String getDescription(float relativeX, float relativeY) {
++			if (mannaInformation == null || mannaInformation.getLevel(soldierType) >= mannaInformation.getMaximumLevel()) {
++				return null; // highest level reached: there is nothing to promote to, the button is not drawn either
++			}
+ 			return Labels.getString("upgrade_warriors", Labels.getName(soldierType));
+ 		}
+ 
 PATCH_EOF
 cat > "$WORK/patches/07-tooltip-position.patch" <<'PATCH_EOF'
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
@@ -1454,24 +1470,33 @@ index f973bd6..2df6ae8 100644
 PATCH_EOF
 cat > "$WORK/patches/11-amazon-storage-shadow.patch" <<'PATCH_EOF'
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/MapObjectDrawer.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/MapObjectDrawer.java
-index 10cc924..1b19833 100644
+index 10cc924..8f25f5b 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/MapObjectDrawer.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/MapObjectDrawer.java
-@@ -1349,8 +1349,22 @@ public class MapObjectDrawer {
+@@ -1321,6 +1321,8 @@ public class MapObjectDrawer {
+ 	 * @param color
+ 	 * 		Gray color shade
+ 	 */
++	private boolean marketplaceLogged = false;
++
+ 	private void drawBuilding(int x, int y, IBuilding building, float color) {
+ 		BuildingVariant variant = building.getBuildingVariant();
+ 
+@@ -1349,14 +1351,50 @@ public class MapObjectDrawer {
  			} else if(variant.isVariantOf(EBuildingType.STOCK)) {
  				float[] zvalues = new float[] {-4*z_per_y, -2*z_per_y, 2*z_per_y, 3*z_per_y, 2*z_per_y, -2*z_per_y};
  				ImageLink[] images = variant.getImages();
 +				// Every part of the storage carries the shadow of the whole building. Drawn six times on top of each other the translucent shadow
 +				// becomes a solid black area, so only the last part that has a shadow draws it.
 +				int shadowPart = 0;
- 				for (int i = 0; i != 6; i++) {
--					draw(imageProvider.getImage(images[i]), x, y, zvalues[i], color);
++				for (int i = 0; i != 6; i++) {
 +					Image part = imageProvider.getImage(images[i]);
 +					if (part instanceof SettlerImage && ((SettlerImage) part).getShadow() != null) {
 +						shadowPart = i;
 +					}
 +				}
-+				for (int i = 0; i != 6; i++) {
+ 				for (int i = 0; i != 6; i++) {
+-					draw(imageProvider.getImage(images[i]), x, y, zvalues[i], color);
 +					Image part = imageProvider.getImage(images[i]);
 +					if (i == shadowPart) {
 +						draw(part, x, y, zvalues[i], color);
@@ -1481,6 +1506,48 @@ index 10cc924..1b19833 100644
  				}
  			} else {
  				ImageLink[] images = variant.getImages();
++
++				// Like the storage, the two parts of a marketplace carry (nearly) the same shadow of the whole building. Drawn on top of each other
++				// the translucent shadows add up to a solid black area, so only the first part (the base, it has the larger shadow and is drawn behind
++				// the building) draws its shadow.
++				int shadowPart = -1;
++				if (variant.isVariantOf(EBuildingType.MARKET_PLACE)) {
++					shadowPart = 0;
++					if (!marketplaceLogged) {
++						marketplaceLogged = true;
++						for (int i = 0; i < images.length; i++) {
++							Image part = imageProvider.getImage(images[i]);
++							System.out.println("marketplace part " + i + ": " + part.getClass().getSimpleName() + ", shadow: "
++									+ (part instanceof SettlerImage ? String.valueOf(((SettlerImage) part).getShadow() != null) : "n/a"));
++						}
++					}
++				}
++
+ 				if (images.length > 0) {
+ 					Image image = imageProvider.getImage(images[0]);
+-					draw(image, x, y, building.getBuildingVariant().isVariantOf(EBuildingType.MARKET_PLACE) ? BACKGROUND_Z : 0, null, color);
++					float z = building.getBuildingVariant().isVariantOf(EBuildingType.MARKET_PLACE) ? BACKGROUND_Z : 0;
++					if (shadowPart == -1 || shadowPart == 0) {
++						draw(image, x, y, z, null, color);
++					} else {
++						drawOnlyImage(image, x, y, z, null, color);
++					}
+ 				}
+ 
+ 				byte fow = visibleGrid != null ? visibleGrid[x][y] : CommonConstants.FOG_OF_WAR_VISIBLE;
+@@ -1367,7 +1405,11 @@ public class MapObjectDrawer {
+ 
+ 				for (int i = 1; i < images.length; i++) {
+ 					Image image = imageProvider.getImage(images[i]);
+-					draw(image, x, y, tower_front_offset, color);
++					if (shadowPart == -1 || shadowPart == i) {
++						draw(image, x, y, tower_front_offset, color);
++					} else {
++						drawOnlyImage(image, x, y, tower_front_offset, null, color);
++					}
+ 				}
+ 			}
+ 		} else if (state >= .01f) {
 PATCH_EOF
 cat > "$WORK/patches/12-language-selection-czech.patch" <<'PATCH_EOF'
 diff --git a/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java b/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java
@@ -2827,7 +2894,822 @@ index 58428f9..e8d0ef5 100644
  # Start screen
  
 PATCH_EOF
-PATCH_NAMES="01-lan-multiplayer-broadcast 02-endgame-player-names 03-gifts-of-the-gods-spell 04-soldiers-ignore-far-civilians 05-font-quality-and-size 06-building-cost-tooltip 07-tooltip-position 08-in-game-messages 09-messages-layout-and-settings-file 10-game-speed-and-fps-limit 11-amazon-storage-shadow 12-language-selection-czech 13-thief-fixes 14-zoom-indicator"
+cat > "$WORK/patches/15-control-groups.patch" <<'PATCH_EOF'
+diff --git a/go.graphics.swing/src/main/java/go/graphics/swing/contextcreator/GLFWContextCreator.java b/go.graphics.swing/src/main/java/go/graphics/swing/contextcreator/GLFWContextCreator.java
+index 3c19034..9b6ae5d 100644
+--- a/go.graphics.swing/src/main/java/go/graphics/swing/contextcreator/GLFWContextCreator.java
++++ b/go.graphics.swing/src/main/java/go/graphics/swing/contextcreator/GLFWContextCreator.java
+@@ -179,6 +179,10 @@ public class GLFWContextCreator extends AsyncContextCreator {
+ 				}
+ 			}
+ 
++			if(mod != null) {
++				return; // a modifier key alone is no key event, it would block the next key (e.g. Control + 1) until it is released
++			}
++
+ 			if(action == GLFW.GLFW_PRESS) {
+ 				startKeyEvent(name);
+ 			} else if(action == GLFW.GLFW_RELEASE){
+diff --git a/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java b/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java
+index 25271b4..859fdf9 100644
+--- a/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java
++++ b/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java
+@@ -62,6 +62,11 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 
+ 	private int modifiers;
+ 
++	/**
++	 * The component that receives the keyboard events.
++	 */
++	private final Component component;
++
+ 	/**
+ 	 * Creates a new event converter, that converts swing events to go events.
+ 	 * 
+@@ -72,6 +77,7 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 	 */
+ 	public GOSwingEventConverter(Component component, GOEventHandlerProvider provider) {
+ 		super(provider);
++		this.component = component;
+ 		this.scaleFactor = () -> {
+ 			AffineTransform trans = component.getGraphicsConfiguration().getDefaultTransform();
+ 			return (trans != null) ? trans.getScaleX() : 1.0;
+@@ -89,6 +95,15 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 		addReplaceRule(new EventReplacementRule(ReplacableEvent.PAN, Replacement.COMMAND_ACTION, MOUSE_TIME_TRSHOLD, MOUSE_MOVE_TRESHOLD));
+ 	}
+ 
++	/**
++	 * Nothing else gives the keyboard focus to the game screen (a click on a canvas does not do that by itself), so no key was received at all.
++	 */
++	private void requestKeyboardFocus() {
++		if (!component.hasFocus()) {
++			component.requestFocusInWindow();
++		}
++	}
++
+ 	private UIPoint convertToLocal(MouseEvent e) {
+ 		return new UIPoint(e.getX() * scaleFactor.get(), (e.getComponent().getHeight() - e.getY()) * scaleFactor.get());
+ 
+@@ -97,6 +112,7 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 	@Override
+ 	public void mouseEntered(MouseEvent e) {
+ 		updateModifiers(e);
++		requestKeyboardFocus();
+ 		startHover(convertToLocal(e));
+ 	}
+ 
+@@ -120,6 +136,7 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 	@Override
+ 	public void mousePressed(MouseEvent e) {
+ 		updateModifiers(e);
++		requestKeyboardFocus();
+ 		int mouseButton = e.getButton();
+ 		UIPoint local = convertToLocal(e);
+ 		if (mouseButton == MouseEvent.BUTTON1) {
+@@ -160,6 +177,9 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 	@Override
+ 	public void keyPressed(KeyEvent e) {
+ 		updateModifiers(e);
++		if (isModifierKey(e)) {
++			return; // a modifier key alone is no key event, it would block the next key (e.g. Control + 1) until it is released
++		}
+ 		String text = getKeyName(e);
+ 		startKeyEvent(text);
+ 		/*
+@@ -261,9 +281,18 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 	@Override
+ 	public void keyReleased(KeyEvent e) {
+ 		updateModifiers(e);
++		if (isModifierKey(e)) {
++			return;
++		}
+ 		endKeyEvent(getKeyName(e));
+ 	}
+ 
++	private static boolean isModifierKey(KeyEvent e) {
++		int code = e.getKeyCode();
++		return code == KeyEvent.VK_CONTROL || code == KeyEvent.VK_SHIFT || code == KeyEvent.VK_ALT || code == KeyEvent.VK_ALT_GRAPH
++				|| code == KeyEvent.VK_META;
++	}
++
+ 	@Override
+ 	public void keyTyped(KeyEvent e) {
+ 	}
+diff --git a/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java b/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java
+index fc1a84e..eb00550 100644
+--- a/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java
++++ b/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java
+@@ -210,6 +210,17 @@ public class AbstractEventConverter {
+ 	}
+ 
+ 	protected synchronized void startKeyEvent(String string) {
++		if (string == null) {
++			return;
++		}
++		if (string.length() == 1 && string.charAt(0) >= '0' && string.charAt(0) <= '9' && getCurrentModifiers().contains(EModifier.CTRL)) {
++			// Control + digit is a different key than the digit alone (control groups)
++			string = "CTRL+" + string;
++		}
++		char lastChar = string.charAt(string.length() - 1);
++		if (lastChar >= '0' && lastChar <= '9') {
++			System.out.println("key pressed: " + string); // helps to find out whether the control group keys arrive
++		}
+ 		if (ongoingKeyEvent == null) {
+ 			ongoingKeyEvent = new GOKeyEvent(string);
+ 			replaceKeyEvent(ongoingKeyEvent);
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+index 8d990a8..5f7931c 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+@@ -113,6 +113,20 @@ public enum EActionType {
+ 	 */
+ 	SHOW_SELECTION,
+ 
++	/**
++	 * Stores the current selection in a control group (Control + 0..9).
++	 *
++	 * @see GroupAction
++	 */
++	ASSIGN_GROUP,
++
++	/**
++	 * Selects the units of a control group again (0..9).
++	 *
++	 * @see GroupAction
++	 */
++	RECALL_GROUP,
++
+ 	/**
+ 	 * Sets the screen to display current message.
+ 	 */
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/GroupAction.java b/jsettlers.common/src/main/java/jsettlers/common/action/GroupAction.java
+new file mode 100644
+index 0000000..e8adc61
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/GroupAction.java
+@@ -0,0 +1,27 @@
++package jsettlers.common.action;
++
++/**
++ * Action for the control groups: {@link EActionType#ASSIGN_GROUP} and {@link EActionType#RECALL_GROUP}.
++ */
++public class GroupAction extends Action {
++
++	/** Number of groups (keys 1 to 9 and 0). */
++	public static final int GROUP_COUNT = 10;
++
++	private final int group;
++
++	/**
++	 * @param actionType
++	 *            {@link EActionType#ASSIGN_GROUP} or {@link EActionType#RECALL_GROUP}
++	 * @param group
++	 *            The number of the group, 0 to {@link #GROUP_COUNT} - 1 (the number on the key).
++	 */
++	public GroupAction(EActionType actionType, int group) {
++		super(actionType);
++		this.group = group;
++	}
++
++	public int getGroup() {
++		return group;
++	}
++}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index f421148..12cbde8 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -49,6 +49,7 @@ import jsettlers.common.CommitInfo;
+ import jsettlers.common.CommonConstants;
+ import jsettlers.common.action.Action;
+ import jsettlers.common.action.EActionType;
++import jsettlers.common.action.GroupAction;
+ import jsettlers.common.action.IAction;
+ import jsettlers.common.action.PointAction;
+ import jsettlers.common.action.ScreenChangeAction;
+@@ -924,6 +925,12 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 			return new Action(EActionType.DESTROY);
+ 		} else if ("ESCAPE".equalsIgnoreCase(keyCode)) {
+ 			return new Action(EActionType.ABORT);
++		} else if (keyCode != null && keyCode.length() == 1 && keyCode.charAt(0) >= '0' && keyCode.charAt(0) <= '9') {
++			// 0..9: select a control group
++			return new GroupAction(EActionType.RECALL_GROUP, keyCode.charAt(0) - '0');
++		} else if (keyCode != null && keyCode.length() == 6 && keyCode.startsWith("CTRL+") && keyCode.charAt(5) >= '0' && keyCode.charAt(5) <= '9') {
++			// Control + 0..9: store the selection in a control group
++			return new GroupAction(EActionType.ASSIGN_GROUP, keyCode.charAt(5) - '0');
+ 		} else {
+ 			return null;
+ 		}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+index d407a20..de0f737 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+@@ -14,6 +14,7 @@
+  */
+ package jsettlers.input;
+ 
++import java.util.ArrayList;
+ import java.util.Comparator;
+ import java.util.EnumSet;
+ import java.util.LinkedList;
+@@ -32,6 +33,7 @@ import jsettlers.common.CommonConstants;
+ import jsettlers.common.action.BuildAction;
+ import jsettlers.common.action.CastSpellAction;
+ import jsettlers.common.action.ChangeTradingRequestAction;
++import jsettlers.common.action.GroupAction;
+ import jsettlers.common.action.ConvertAction;
+ import jsettlers.common.action.EActionType;
+ import jsettlers.common.action.EMoveToType;
+@@ -131,6 +133,21 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 	 */
+ 	private SelectionSet currentSelection = new SelectionSet();
+ 
++	/**
++	 * The control groups (Control + 0..9 stores the selection, 0..9 selects it). Only used by the user interface, so they are not part of the game
++	 * state and are not saved.
++	 */
++	private final List<IGuiMovable>[] controlGroups = newControlGroups();
++
++	@SuppressWarnings("unchecked")
++	private static List<IGuiMovable>[] newControlGroups() {
++		final List<IGuiMovable>[] groups = new List[GroupAction.GROUP_COUNT];
++		for (int i = 0; i < groups.length; i++) {
++			groups[i] = new ArrayList<>();
++		}
++		return groups;
++	}
++
+ 	public GuiInterface(IMapInterfaceConnector connector, IGameClock clock, ITaskScheduler taskScheduler, IGuiInputGrid grid, IGameStoppable gameStoppable, byte playerId, boolean multiplayer) {
+ 		this.connector = connector;
+ 		this.clock = clock;
+@@ -285,6 +302,14 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 				showSelection();
+ 				break;
+ 
++			case ASSIGN_GROUP:
++				assignGroup(((GroupAction) action).getGroup());
++				break;
++
++			case RECALL_GROUP:
++				recallGroup(((GroupAction) action).getGroup());
++				break;
++
+ 			case SCREEN_CHANGE:
+ 				constructionMarksCalculator.setScreen(((ScreenChangeAction) action).getScreenArea());
+ 				break;
+@@ -570,6 +595,51 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 		}
+ 	}
+ 
++	/**
++	 * Stores the movables of the current selection in the given control group (and removes them from every other group, a unit is only member of one
++	 * group). An empty selection empties the group. Buildings are not stored, the selection is left as it is in that case.
++	 */
++	private void assignGroup(int group) {
++		if (group < 0 || group >= controlGroups.length || (currentSelection.getSelectionType() == ESelectionType.BUILDING && !currentSelection.isEmpty())) {
++			return;
++		}
++
++		final List<IGuiMovable> members = new ArrayList<>();
++		for (final ISelectable selectable : currentSelection) {
++			if (selectable instanceof IGuiMovable) {
++				members.add((IGuiMovable) selectable);
++			}
++		}
++		// a unit is only member of one group: the last one it was added to
++		for (final List<IGuiMovable> otherGroup : controlGroups) {
++			otherGroup.removeAll(members);
++		}
++		controlGroups[group] = members;
++	}
++
++	/**
++	 * Selects the members of the given control group that are still alive (and still ours). The selection is not changed if nobody is left.
++	 */
++	private void recallGroup(int group) {
++		if (group < 0 || group >= controlGroups.length) {
++			return;
++		}
++
++		final List<IGuiMovable> members = new ArrayList<>();
++		for (final IGuiMovable member : controlGroups[group]) {
++			if (!(member instanceof IGraphicsMovable) || ((IGraphicsMovable) member).isAlive()) {
++				if (canSelectPlayer(member.getPlayer())) {
++					members.add(member);
++				}
++			}
++		}
++		controlGroups[group] = members; // forget the dead ones
++
++		if (!members.isEmpty()) {
++			setSelection(new SelectionSet(members));
++		}
++	}
++
+ 	private void showSelection() {
+ 		int x = 0;
+ 		int y = 0;
+PATCH_EOF
+cat > "$WORK/patches/16-peacetime.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/statistics/IGameTimeProvider.java b/jsettlers.common/src/main/java/jsettlers/common/statistics/IGameTimeProvider.java
+index 3636a9a..7da015b 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/statistics/IGameTimeProvider.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/statistics/IGameTimeProvider.java
+@@ -58,4 +58,13 @@ public interface IGameTimeProvider {
+ 	 * @return true if the game is pausing, false if not.
+ 	 */
+ 	boolean isGamePausing();
++
++	/**
++	 * Gets the game time at which the peace time ends.
++	 *
++	 * @return The game time in milliseconds at which the peace time ends. 0 if there is no peace time.
++	 */
++	default int getPeaceTimeEnd() {
++		return 0;
++	}
+ }
+\ No newline at end of file
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index 12cbde8..ccfda38 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -649,6 +649,15 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 			String zoomString = Labels.getString("map-zoom", Math.round(context.getScreen().getZoom() * 100));
+ 			x -= (zoomString.length() + 1) * letterWidth;
+ 			drawer.drawString(x, yFirstLine, zoomString);
++
++			// remaining peace time, left of the zoom. It disappears when the peace time is over.
++			int peaceTimeLeft = gameTimeProvider.getPeaceTimeEnd() - gameTimeProvider.getGameTime();
++			if (peaceTimeLeft > 0) {
++				int secondsLeft = (peaceTimeLeft + 999) / 1000;
++				String peaceString = Labels.getString("map-peacetime", secondsLeft / 60, secondsLeft % 60);
++				x -= (peaceString.length() + 1) * letterWidth;
++				drawer.drawString(x, yFirstLine, peaceString);
++			}
+ 		}
+ 	}
+ 
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index d97e521..2e57b60 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -440,6 +440,7 @@ movable_BREWER = Sládek
+ map-time = Čas: %d:%02d:%02d
+ map-fps = FPS: %.1f Rychlost: %.1fx
+ map-zoom = Měřítko: %d%%
++map-peacetime = Doba míru: %d:%02d
+ 
+ # Start screen
+ 
+@@ -568,6 +569,12 @@ stats-panel-gold = Zlato
+ stats-panel-soldiers = naverbovaní vojáci
+ 
+ peace-time-WITHOUT = žádná
++peace-time-MINUTES_10 = 10 minut
++peace-time-MINUTES_20 = 20 minut
++peace-time-MINUTES_30 = 30 minut
++peace-time-MINUTES_40 = 40 minut
++peace-time-MINUTES_50 = 50 minut
++peace-time-MINUTES_60 = 60 minut
+ player-type-HUMAN = Člověk
+ player-type-AI_VERY_EASY = Počítač (velmi snadný)
+ player-type-AI_EASY = Počítač (snadný)
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index e8d0ef5..1c1c85c 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -446,6 +446,7 @@ movable_BREWER = Brewer
+ map-time = Time: %d:%02d:%02d
+ map-fps = FPS: %.1f Speed: %.1fx
+ map-zoom = Zoom: %d%%
++map-peacetime = Peace time: %d:%02d
+ 
+ # Start screen
+ 
+@@ -574,6 +575,12 @@ stats-panel-gold = Gold
+ stats-panel-soldiers = recruited soldiers
+ 
+ peace-time-WITHOUT = without
++peace-time-MINUTES_10 = 10 minutes
++peace-time-MINUTES_20 = 20 minutes
++peace-time-MINUTES_30 = 30 minutes
++peace-time-MINUTES_40 = 40 minutes
++peace-time-MINUTES_50 = 50 minutes
++peace-time-MINUTES_60 = 60 minutes
+ player-type-HUMAN = Human
+ player-type-AI_VERY_EASY = Computer (very easy)
+ player-type-AI_EASY = Computer (easy)
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+index 58cdb58..fa7cd74 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+@@ -39,6 +39,7 @@ import jsettlers.input.tasks.EGuiAction;
+ import jsettlers.input.tasks.MovableGuiTask;
+ import jsettlers.input.tasks.MoveToGuiTask;
+ import jsettlers.input.tasks.OrderShipGuiTask;
++import jsettlers.input.tasks.PeaceTimeGuiTask;
+ import jsettlers.input.tasks.SetAcceptedStockMaterialGuiTask;
+ import jsettlers.input.tasks.SetBuildingPriorityGuiTask;
+ import jsettlers.input.tasks.SetDockGuiTask;
+@@ -59,6 +60,7 @@ import jsettlers.logic.buildings.military.occupying.OccupyingBuilding;
+ import jsettlers.logic.buildings.others.StockBuilding;
+ import jsettlers.logic.buildings.trading.TradingBuilding;
+ import jsettlers.logic.buildings.workers.DockyardBuilding;
++import jsettlers.logic.constants.MatchConstants;
+ import jsettlers.logic.map.grid.partition.manager.settings.MaterialProductionSettings;
+ import jsettlers.logic.movable.Movable;
+ import jsettlers.logic.movable.MovableManager;
+@@ -243,6 +245,12 @@ class GuiTaskExecutor implements ITaskExecutor {
+ 				break;
+ 			}
+ 
++			case SET_PEACE_TIME: {
++				PeaceTimeGuiTask task = (PeaceTimeGuiTask) guiTask;
++				MatchConstants.setPeaceTimeEnd(task.getMinutes() * 60 * 1000);
++				break;
++			}
++
+ 			default:
+ 				break;
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/tasks/EGuiAction.java b/jsettlers.logic/src/main/java/jsettlers/input/tasks/EGuiAction.java
+index 214977d..2ceef04 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/tasks/EGuiAction.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/tasks/EGuiAction.java
+@@ -57,6 +57,13 @@ public enum EGuiAction {
+ 	CAST_SPELL,
+ 	CHANGE_MOVABLE_SETTINGS,
+ 	SET_MOVABLE_LIMIT_TYPE,
++
++	/**
++	 * Sets the peace time (no fighting) at the beginning of a game.
++	 *
++	 * @see PeaceTimeGuiTask
++	 */
++	SET_PEACE_TIME,
+ 	;
+ 
+ 	public static final EGuiAction[] VALUES = values();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/tasks/PeaceTimeGuiTask.java b/jsettlers.logic/src/main/java/jsettlers/input/tasks/PeaceTimeGuiTask.java
+new file mode 100644
+index 0000000..3233c88
+--- /dev/null
++++ b/jsettlers.logic/src/main/java/jsettlers/input/tasks/PeaceTimeGuiTask.java
+@@ -0,0 +1,51 @@
++package jsettlers.input.tasks;
++
++import java.io.DataInputStream;
++import java.io.DataOutputStream;
++import java.io.IOException;
++
++/**
++ * Sets the length of the peace time at the start of a game. During the peace time, no military unit attacks anybody.
++ * <p>
++ * The task is a normal lockstep task, so all players of a multiplayer game (and replays) get the same peace time.
++ */
++public class PeaceTimeGuiTask extends SimpleGuiTask {
++	private int minutes;
++
++	public PeaceTimeGuiTask() {
++	}
++
++	public PeaceTimeGuiTask(byte playerId, int minutes) {
++		super(EGuiAction.SET_PEACE_TIME, playerId);
++		this.minutes = minutes;
++	}
++
++	/**
++	 * @return The length of the peace time in minutes of game time (counted from the start of the game).
++	 */
++	public int getMinutes() {
++		return minutes;
++	}
++
++	@Override
++	protected void serializeTask(DataOutputStream dos) throws IOException {
++		super.serializeTask(dos);
++		dos.writeInt(minutes);
++	}
++
++	@Override
++	protected void deserializeTask(DataInputStream dis) throws IOException {
++		super.deserializeTask(dis);
++		minutes = dis.readInt();
++	}
++
++	@Override
++	public boolean equals(Object o) {
++		return this == o || (o instanceof PeaceTimeGuiTask && super.equals(o) && minutes == ((PeaceTimeGuiTask) o).minutes);
++	}
++
++	@Override
++	public int hashCode() {
++		return 31 * super.hashCode() + minutes;
++	}
++}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/constants/MatchConstants.java b/jsettlers.logic/src/main/java/jsettlers/logic/constants/MatchConstants.java
+index e97a3e2..cbe4b9e 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/constants/MatchConstants.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/constants/MatchConstants.java
+@@ -55,6 +55,12 @@ public final class MatchConstants {
+ 	private static ExtendedRandom gameRandom;
+ 	private static ExtendedRandom aiRandom;
+ 
++	/**
++	 * Game time (in ms) at which the peace time ends. 0 = no peace time. It is set by a lockstep task, so it is the same on all clients.
++	 * It is not part of savegames (a loaded game has no peace time).
++	 */
++	private static volatile int peaceTimeEnd = 0;
++
+ 	public static void init(IGameClock clock, long randomSeed) {
+ 		clearState();
+ 		MatchConstants.clock = clock;
+@@ -69,10 +75,31 @@ public final class MatchConstants {
+ 			clock.stopExecution();
+ 		}
+ 		clock = null;
++		peaceTimeEnd = 0;
+ 		gameRandom = null;
+ 		aiRandom = null;
+ 	}
+ 
++	public static void setPeaceTimeEnd(int gameTimeMs) {
++		peaceTimeEnd = Math.max(gameTimeMs, 0);
++	}
++
++	/**
++	 * @return The game time in ms at which the peace time ends, 0 if there is no peace time.
++	 */
++	public static int getPeaceTimeEnd() {
++		return peaceTimeEnd;
++	}
++
++	/**
++	 * @return true while the peace time is running. During the peace time, nobody may attack anybody.
++	 */
++	public static boolean isPeaceTime() {
++		IGameClock currentClock = clock;
++		int end = peaceTimeEnd;
++		return end > 0 && currentClock != null && currentClock.getTime() < end;
++	}
++
+ 	public static IGameClock clock() {
+ 		return clock;
+ 	}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/movable/MovableGrid.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/movable/MovableGrid.java
+index ea267dc..27f2b4e 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/movable/MovableGrid.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/movable/MovableGrid.java
+@@ -28,6 +28,7 @@ import jsettlers.common.utils.coordinates.CoordinateStream;
+ import jsettlers.common.utils.mutables.MutableBoolean;
+ import jsettlers.logic.SerializationUtils;
+ import jsettlers.logic.constants.Constants;
++import jsettlers.logic.constants.MatchConstants;
+ import jsettlers.logic.map.grid.landscape.IWalkableGround;
+ import jsettlers.logic.movable.interfaces.IAttackable;
+ import jsettlers.logic.movable.interfaces.IAttackableMovable;
+@@ -148,6 +149,9 @@ public final class MovableGrid implements Serializable {
+ 	 * @return
+ 	 */
+ 	public static boolean isEnemy(IPlayer player, IAttackable otherAttackable) {
++		if (MatchConstants.isPeaceTime()) {
++			return false; // nobody attacks anybody during the peace time
++		}
+ 		return otherAttackable.getPlayer().getTeamId() != player.getTeamId() && otherAttackable.isAttackable();
+ 	}
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/objects/ObjectsGrid.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/objects/ObjectsGrid.java
+index 7afd22e..e34c27a 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/objects/ObjectsGrid.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/objects/ObjectsGrid.java
+@@ -30,6 +30,7 @@ import jsettlers.common.utils.coordinates.CoordinateStream;
+ import jsettlers.logic.SerializationUtils;
+ import jsettlers.logic.buildings.Building;
+ import jsettlers.logic.constants.Constants;
++import jsettlers.logic.constants.MatchConstants;
+ import jsettlers.logic.movable.interfaces.IAttackable;
+ import jsettlers.logic.movable.interfaces.IInformable;
+ 
+@@ -217,12 +218,13 @@ public final class ObjectsGrid implements Serializable {
+ 		}
+ 
+ 		byte movableTeam = attackable.getPlayer().getTeamId();
++		final boolean peaceTime = MatchConstants.isPeaceTime(); // towers do not react to enemies during the peace time
+ 
+ 		area.filterBounds(width, height)
+ 				.forEach((x, y) -> {
+ 					IAttackable currTower = (IAttackable) getMapObjectAt(x, y, EMapObjectType.ATTACKABLE_TOWER);
+ 
+-					if (currTower != null && currTower.getPlayer().getTeamId() != movableTeam) {
++					if (!peaceTime && currTower != null && currTower.getPlayer().getTeamId() != movableTeam) {
+ 						currTower.informAboutAttackable(attackable);
+ 
+ 						if (informAttackable) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/military/SoldierMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/military/SoldierMovable.java
+index e022db6..445e9e3 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/military/SoldierMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/military/SoldierMovable.java
+@@ -40,6 +40,8 @@ public abstract class SoldierMovable extends AttackableHumanMovable implements I
+ 	private ShortPoint2D[] patrolPoints = null;
+ 
+ 	private boolean enemyNearby;
++	/** true, after the soldier has looked around once more because the peace time is over. */
++	private boolean peaceEndHandled;
+ 	private IAttackable toCloseEnemy;
+ 	private ShortPoint2D startPoint;
+ 
+@@ -130,7 +132,7 @@ public abstract class SoldierMovable extends AttackableHumanMovable implements I
+ 					)
+ 				),
+ 				// attack enemies from the top of the tower
+-				guard(mov -> mov.isBowman() && mov.isInTower && mov.enemyNearby,
++				guard(mov -> mov.isBowman() && mov.isInTower && mov.hasEnemyNearby(),
+ 					sequence(
+ 						selector(
+ 							findEnemy(),
+@@ -143,7 +145,7 @@ public abstract class SoldierMovable extends AttackableHumanMovable implements I
+ 					)
+ 				),
+ 				// attack enemy
+-				guard(mov -> mov.enemyNearby && !mov.isInTower,
++				guard(mov -> mov.hasEnemyNearby() && !mov.isInTower,
+ 					selector(
+ 						sequence(
+ 							// handle potential enemy
+@@ -224,6 +226,18 @@ public abstract class SoldierMovable extends AttackableHumanMovable implements I
+ 		);
+ 	}
+ 
++	/**
++	 * Enemies are not reported to the soldiers during the peace time (and a soldier that has found nobody stops looking). So every soldier has to
++	 * look around once when the peace time is over, otherwise it would only notice enemies that move next to it.
++	 */
++	private boolean hasEnemyNearby() {
++		if (!enemyNearby && !peaceEndHandled && MatchConstants.getPeaceTimeEnd() > 0 && !MatchConstants.isPeaceTime()) {
++			enemyNearby = true;
++			peaceEndHandled = true;
++		}
++		return enemyNearby;
++	}
++
+ 	private static Node<SoldierMovable> findEnemy() {
+ 		return condition(mov -> {
+ 			mov.enemy = mov.grid.getEnemyInSearchArea(mov.getAttackPosition(), mov, mov.getMinSearchDistance(), mov.getMaxSearchDistance(), !mov.defending);
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/GameTimeProvider.java b/jsettlers.logic/src/main/java/jsettlers/main/GameTimeProvider.java
+index 1f868b6..20d6843 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/GameTimeProvider.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/GameTimeProvider.java
+@@ -15,6 +15,7 @@
+ package jsettlers.main;
+ 
+ import jsettlers.common.statistics.IGameTimeProvider;
++import jsettlers.logic.constants.MatchConstants;
+ import jsettlers.network.client.interfaces.IGameClock;
+ 
+ /**
+@@ -41,6 +42,11 @@ public class GameTimeProvider implements IGameTimeProvider {
+ 		return gameClock.isPausing();
+ 	}
+ 
++	@Override
++	public int getPeaceTimeEnd() {
++		return MatchConstants.getPeaceTimeEnd();
++	}
++
+ 	@Override
+ 	public float getGameSpeed() {
+ 		return gameClock.getGameSpeed();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+index 61b0d1f..ae5133d 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+@@ -44,6 +44,7 @@ import jsettlers.common.statistics.IGameTimeProvider;
+ import jsettlers.input.GuiInterface;
+ import jsettlers.input.IGameStoppable;
+ import jsettlers.input.PlayerState;
++import jsettlers.input.tasks.PeaceTimeGuiTask;
+ import jsettlers.logic.buildings.Building;
+ import jsettlers.logic.buildings.trading.HarborBuilding;
+ import jsettlers.logic.buildings.trading.MarketBuilding;
+@@ -70,6 +71,16 @@ public class JSettlersGame {
+ 	private static final SimpleDateFormat LOG_DATE_FORMATTER = new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss", Locale.US);
+ 	private final Object stopMutex = new Object();
+ 
++	/**
++	 * Length of the peace time (in minutes) for the next game that is started. Set by the menu of the host / single player just before the game
++	 * is started. The game reads and resets it when it starts. It is sent to all players as a normal game task.
++	 */
++	private static volatile int nextGamePeaceTimeMinutes = 0;
++
++	public static void setNextGamePeaceTimeMinutes(int minutes) {
++		nextGamePeaceTimeMinutes = Math.max(minutes, 0);
++	}
++
+ 	private final IGameCreator mapCreator;
+ 	private final INetworkConnector networkConnector;
+ 	private final boolean multiplayer;
+@@ -222,6 +233,9 @@ public class JSettlersGame {
+ 				networkConnector.setStartFinished(true);
+ 				waitForAllPlayersStartFinished(networkConnector);
+ 
++				final int peaceTimeMinutes = nextGamePeaceTimeMinutes;
++				nextGamePeaceTimeMinutes = 0;
++
+ 				final IMapInterfaceConnector connector = startingGameListener.preLoadFinished(this);
+ 				GuiInterface guiInterface = new GuiInterface(connector, MatchConstants.clock(), networkConnector.getTaskScheduler(),
+ 						mainGrid.getGuiInputGrid(), this, initialGameState.getPlayerId(), multiplayer);
+@@ -232,6 +246,9 @@ public class JSettlersGame {
+ 				networkConnector.getGameClock().schedule(aiExecutor, (short) 1000);
+ 
+ 				MatchConstants.clock().startExecution(); // WARNING: GAME CLOCK IS STARTED!
++				if (peaceTimeMinutes > 0 && replayFileInputStream == null) { // a replay contains this task already
++					networkConnector.getTaskScheduler().scheduleTask(new PeaceTimeGuiTask(initialGameState.getPlayerId(), peaceTimeMinutes));
++				}
+ 				// NO CONFIGURATION AFTER THIS POINT! =================================
+ 				gameRunning = true;
+ 
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index 5d03de4..7047f90 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -238,6 +238,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 
+ 			MapStartResourcesUIWrapper selected = (MapStartResourcesUIWrapper) startResourcesComboBox.getSelectedItem();
+ 			InitialGameState initialGameState = new InitialGameState(playerSlots.get(0).getSlot(), playerSettings, randomSeed, selected.getStartResources());
++			applySelectedPeaceTime();
+ 			JSettlersGame game = new JSettlersGame(mapLoader, initialGameState);
+ 			IStartingGame startingGame = game.start();
+ 			settlersFrame.showStartingGamePanel(startingGame);
+@@ -251,7 +252,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	public void setNewMultiPlayerMap(MapLoader mapLoader, IMultiplayerConnector connector) {
+ 		this.playerSlotFactory = new HostOfMultiplayerPlayerSlotFactory(connector);
+ 		titleLabel.setText(Labels.getString("join-game-panel-new-multi-player-game-title"));
+-		peaceTimeComboBox.setEnabled(false);
++		peaceTimeComboBox.setEnabled(true);
+ 		startResourcesComboBox.setEnabled(false);
+ 		startGameButton.setVisible(true);
+ 		setChatVisible(true);
+@@ -269,7 +270,10 @@ public class JoinGamePanel extends BackgroundPanel {
+ 			public void gameJoined(IJoinPhaseMultiplayerGameConnector connector) {
+ 				SwingUtilities.invokeLater(() -> {
+ 					initializeChatFor(connector);
+-					setStartButtonActionListener(e -> connector.startGame());
++					setStartButtonActionListener(e -> {
++						applySelectedPeaceTime();
++						connector.startGame();
++					});
+ 					connector.getSlots().setListener(changingSlots -> onSlotsChanged(changingSlots, connector, myId, true));
+ 					connector.setMultiplayerListener(new IMultiplayerListener() {
+ 						@Override
+@@ -399,12 +403,23 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		});
+ 	}
+ 
++	/**
++	 * Hands the selected peace time over to the game that is started next.
++	 */
++	private void applySelectedPeaceTime() {
++		EPeaceTime selected = (EPeaceTime) peaceTimeComboBox.getSelectedItem();
++		JSettlersGame.setNextGamePeaceTimeMinutes(selected == null ? 0 : selected.minutes);
++	}
++
+ 	private void prepareUiFor(MapLoader mapLoader) {
+ 		this.mapLoader = mapLoader;
+ 		mapNameLabel.setText(mapLoader.getMapName());
+ 		mapImage.setIcon(new ImageIcon(JSettlersSwingUtil.createBufferedImageFrom(mapLoader)));
+ 		peaceTimeComboBox.removeAllItems();
+-		peaceTimeComboBox.addItem(EPeaceTime.WITHOUT);
++		for (EPeaceTime peaceTime : EPeaceTime.values()) {
++			peaceTimeComboBox.addItem(peaceTime);
++		}
++		peaceTimeComboBox.setSelectedItem(EPeaceTime.WITHOUT);
+ 		startResourcesComboBox.removeAllItems();
+ 		Arrays.stream(EMapStartResources.values())
+ 				.map(MapStartResourcesUIWrapper::new)
+@@ -512,7 +527,19 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	}
+ 
+ 	private enum EPeaceTime {
+-		WITHOUT;
++		WITHOUT(0),
++		MINUTES_10(10),
++		MINUTES_20(20),
++		MINUTES_30(30),
++		MINUTES_40(40),
++		MINUTES_50(50),
++		MINUTES_60(60);
++
++		final int minutes;
++
++		EPeaceTime(int minutes) {
++			this.minutes = minutes;
++		}
+ 
+ 		@Override
+ 		public String toString() {
+PATCH_EOF
+PATCH_NAMES="01-lan-multiplayer-broadcast 02-endgame-player-names 03-gifts-of-the-gods-spell 04-soldiers-ignore-far-civilians 05-font-quality-and-size 06-building-cost-tooltip 07-tooltip-position 08-in-game-messages 09-messages-layout-and-settings-file 10-game-speed-and-fps-limit 11-amazon-storage-shadow 12-language-selection-czech 13-thief-fixes 14-zoom-indicator 15-control-groups 16-peacetime"
 for P in $PATCH_NAMES; do
 	git apply --check "$WORK/patches/$P.patch" || die "Patch $P cannot be applied - the source code has changed since the tested version."
 	git apply --whitespace=nowarn "$WORK/patches/$P.patch"
@@ -2841,6 +3723,8 @@ grep -q "shadowPart" jsettlers.graphics/src/main/java/jsettlers/graphics/map/dra
 [[ -f jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties ]] || die "Patch 12 was not applied."
 grep -q "homePos" jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java || die "Patch 13 was not applied."
 grep -q "map-zoom" jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java || die "Patch 14 was not applied."
+grep -q "RECALL_GROUP" jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java || die "Patch 15 was not applied."
+grep -q "isPeaceTime" jsettlers.logic/src/main/java/jsettlers/logic/constants/MatchConstants.java || die "Patch 16 was not applied."
 
 # ---------------------------------------------------------------- compilation
 say "Compiling (the first run takes several minutes, dependencies are downloaded)"

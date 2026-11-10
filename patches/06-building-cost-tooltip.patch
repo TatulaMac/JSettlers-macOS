@@ -56,3 +56,17 @@ index 75e420c..0df42f1 100644
  	@Override
  	public void drawAt(GLDrawContext gl) {
  		drawBackground(gl);
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/warriors/WarriorsPanel.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/warriors/WarriorsPanel.java
+index 8f0f6d4..fc879d9 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/warriors/WarriorsPanel.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/warriors/WarriorsPanel.java
+@@ -184,6 +184,9 @@ public class WarriorsPanel extends AbstractContentProvider {
+ 
+ 		@Override
+ 		public String getDescription(float relativeX, float relativeY) {
++			if (mannaInformation == null || mannaInformation.getLevel(soldierType) >= mannaInformation.getMaximumLevel()) {
++				return null; // highest level reached: there is nothing to promote to, the button is not drawn either
++			}
+ 			return Labels.getString("upgrade_warriors", Labels.getName(soldierType));
+ 		}
+ 

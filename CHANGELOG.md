@@ -4,6 +4,35 @@ All notable changes of **JSettlers macOS** compared to upstream
 [settlers-remake](https://github.com/paulwedeck/settlers-remake) are listed here, newest version first.
 The version numbers are specific to this macOS build; upstream does not number its versions (it only shows the git commit).
 
+## [0.6.2-alpha] - control groups, peace time
+
+Same upstream base as before ([PR #92](https://github.com/paulwedeck/settlers-remake/pull/92), commit `47d1d4e`). New patches: `15-control-groups.patch`, `16-peacetime.patch`.
+
+### Added
+- **Control groups** (patch 15): select units and press **Control + 1 ... 9, 0** to store them in a group, press **1 ... 9, 0** to select that group
+  again. Works for every unit type that can be selected (soldiers, thieves, pioneers, geologists, ...), so a group of geologists in a guarded mountain
+  can be called back with one key. Details: only units are stored (not buildings); a selection with several types keeps the same rule as a manual
+  selection (the type with the highest priority wins, e.g. soldiers before geologists); a unit is member of one group only (the last one it was
+  added to, as in other strategy games); dead units are dropped from the group; Control + number with
+  nothing selected empties the group; the groups are part of the user interface only (not saved with the game, not sent to other players).
+- **Peace time** (patch 16): the "Peacetime" selection of the new-game screen (single player and the host of a multiplayer game) was a placeholder
+  with only "without". It now offers 10, 20, 30, 40, 50 and 60 minutes. While the peace time runs, nobody attacks anybody (soldiers, towers and
+  castles do not react to enemies); when it is over, the soldiers look around once more and fight as usual. The remaining time is shown at the top
+  right, left of the zoom ("Peace time: 9:41", Czech: "Doba míru: 9:41"), and disappears when the peace time is over. The time is counted in game
+  time (it stops while the game is paused and runs faster with a higher game speed). The host's setting is sent to all players as a normal game
+  task, so it is the same for everybody and part of replays (players who join a multiplayer game see the selection greyed out; the countdown in the game shows the time). It is not stored in savegames (a loaded game starts without peace time). Texts are
+  in English and Czech.
+
+### Fixed
+- **Marketplace shadow (Asian)** (patch 11): the two parts of the marketplace each carried the shadow of the whole building, so the shadow became a
+  solid black area (the same problem as the Amazon storage). Only one part draws the shadow now.
+- **Promote tooltip** (patch 06): once a soldier type has reached the highest level, hovering over the (invisible) promote button no longer shows
+  "Promote ...".
+- A modifier key (Control, Shift, Option, Command) pressed alone (patch 15) is no longer treated as a key event. It used to block the next key press until
+  it was released, so no shortcut could be combined with a modifier key.
+- **Keyboard focus** (patch 15): the game screen now takes the keyboard focus when the mouse enters it or is pressed on it. Before, nothing gave
+  it the focus, so keyboard shortcuts could stay without any effect on the Mac.
+
 ## [0.6.1-alpha] - language selection, thieves, zoom indicator
 
 Same upstream base as 0.6.0-alpha ([PR #92](https://github.com/paulwedeck/settlers-remake/pull/92), commit `47d1d4e`).

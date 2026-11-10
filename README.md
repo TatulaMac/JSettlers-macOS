@@ -6,7 +6,7 @@
 > This project is not affiliated with, endorsed by or supported by Ubisoft, Blue Byte or the upstream JSettlers project.
 > The game data (graphics and sound) of *The Settlers III* is **not included** - you need your own copy (see below).
 
-Current version: **0.6.1-alpha** (alpha: expect bugs; saved games may become invalid in future versions).
+Current version: **0.6.2-alpha** (alpha: expect bugs; saved games may become invalid in future versions).
 See the [changelog](CHANGELOG.md) for everything that differs from upstream.
 
 ## What you need
@@ -17,7 +17,7 @@ See the [changelog](CHANGELOG.md) for everything that differs from upstream.
   Tested with the GOG version 1.60 data.
 
 ## Installation
-1. Download `JSettlers-macOS-v0.6.1-alpha-arm64.dmg` from the [Releases](../../releases) page.
+1. Download `JSettlers-macOS-v0.6.2-alpha-arm64.dmg` from the [Releases](../../releases) page.
 2. Open the DMG and drag **JSettlers** to the **Applications** folder.
 3. Start JSettlers. macOS may say the app is damaged or from an unidentified developer. It is not signed by Apple (it is signed ad hoc),
    so you have to allow it once. Do **one** of these:
@@ -53,6 +53,12 @@ Texts that are not translated are shown in English. Translations are plain text 
 - **Control + two-finger click** (the secondary click of your trackpad; with a mouse: Control + right click) = forced move: the selected units walk
   there and ignore enemies on the way (recall).
 - **Option + two-finger click** = patrol between the current position and the clicked position.
+- **Control groups:** select units and press **Control + 1** (to **9** and **0**) to store them in a group; press **1** (to **9** and **0**)
+  to select the group again. It works for soldiers, thieves, pioneers, geologists and all other units, so a group of geologists can be called
+  back with one key without selecting them one by one. A unit belongs to one group only (the last one it was stored in). Units that died are dropped from the group. A group is kept until you overwrite it
+  (Control + number with nothing selected empties it); groups are not saved with the game. Buildings cannot be stored.
+- **Peace time:** when creating a game (single player, or as the host of a multiplayer game) you can choose a peace time of 10 to 60 minutes. Nobody
+  attacks until it is over; the countdown is shown at the top right, left of the zoom. It is not saved with the game.
 - A plain two-finger click on a spot is the normal move command. A thief ordered next to a pile of enemy goods steals it and carries it home.
 - The **zoom** is shown at the top right, left of the frame rate (100% = original size, one image pixel per screen pixel).
 - Click on a message at the bottom of the screen to jump to the place it is about.
@@ -68,7 +74,8 @@ and the version shown in the top right corner of the game.
 This build is [PR #92](https://github.com/paulwedeck/settlers-remake/pull/92) (Apple Silicon support, commit `47d1d4e`) plus the patches in
 [`patches`](patches), listed in the [changelog](CHANGELOG.md): LAN multiplayer on macOS, readable bigger text, building costs in the build menu,
 useful messages, correct game speed, better soldier behavior, fixes for the "Gifts of the gods" spell, end-of-game statistics,
-the Amazon storage building and a language selection (English, Czech).
+the Amazon and Asian storage/market buildings, a language selection (English, Czech), thief fixes, a zoom indicator, control groups
+(Control + number) and a selectable peace time.
 
 ## Building it yourself
 You need a Mac with Apple Silicon, git, Xcode command line tools and JDK 17 (`brew install --cask temurin@17`).
