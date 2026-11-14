@@ -1,0 +1,358 @@
+diff --git a/jsettlers.common/src/main/resources/jsettlers/common/buildings/amazon/beekeeping.xml b/jsettlers.common/src/main/resources/jsettlers/common/buildings/amazon/beekeeping.xml
+index 6ad1b8cac..25bf56e55 100644
+--- a/jsettlers.common/src/main/resources/jsettlers/common/buildings/amazon/beekeeping.xml
++++ b/jsettlers.common/src/main/resources/jsettlers/common/buildings/amazon/beekeeping.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+ <!DOCTYPE building SYSTEM "../building.dtd" >
+-<building worker="BEEKEEPER" workradius="10">
++<building worker="BEEKEEPER" workradius="20">
+ 	<ground groundtype="GRASS" />
+ 	<ground groundtype="EARTH" />
+ 	<ground groundtype="FLATTENED" />
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java
+index d7e8a6f9c..424a393ae 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java
+@@ -42,6 +42,11 @@ public interface IWorkerRequestBuilding extends IPlayerable, ILocatable, IBuildi
+ 
+ 	ShortPoint2D getWorkAreaCenter();
+ 
++	/**
++	 * Moves the work area. Used by workers to follow the work automatically if nothing is left to do in the current area.
++	 */
++	void setWorkAreaCenter(ShortPoint2D newWorkAreaCenter);
++
+ 	void occupyBuilding(IManageableWorker worker);
+ 
+ 	BuildingVariant getBuildingVariant();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java
+index 1d83319e6..9ab37f238 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java
+@@ -5,6 +5,8 @@ import jsettlers.algorithms.simplebehaviortree.IEMaterialTypeSupplier;
+ import jsettlers.algorithms.simplebehaviortree.IShortSupplier;
+ import jsettlers.algorithms.simplebehaviortree.Node;
+ import jsettlers.algorithms.simplebehaviortree.nodes.Guard;
++import jsettlers.algorithms.path.Path;
++import jsettlers.common.buildings.BuildingVariant;
+ import jsettlers.common.buildings.EBuildingType;
+ import jsettlers.common.buildings.IBuilding;
+ import jsettlers.common.buildings.stacks.RelativeStack;
+@@ -28,6 +30,8 @@ import jsettlers.logic.player.Player;
+ import java.io.FileOutputStream;
+ import java.io.IOException;
+ import java.io.PrintStream;
++import java.util.ArrayList;
++import java.util.List;
+ import java.util.function.Supplier;
+ 
+ import static jsettlers.algorithms.simplebehaviortree.BehaviorTreeHelper.*;
+@@ -39,6 +43,10 @@ public class BuildingWorkerMovable extends CivilianMovable implements IBuildingW
+ 	protected IWorkerRequestBuilding building;
+ 	private boolean registered = false;
+ 	protected int searchFailedCtr = 0;
++	/** Work area centers used before the current one. Ripe crops that were planted there are still harvested. */
++	private final List<ShortPoint2D> formerWorkAreaCenters = new ArrayList<>();
++	private ShortPoint2D lastWorkAreaCenter = null;
++	private static final int MAX_FORMER_WORK_AREA_CENTERS = 4;
+ 
+ 	public BuildingWorkerMovable(AbstractMovableGrid grid, EMovableType movableType, ShortPoint2D position, Player player, Movable replace) {
+ 		super(grid, movableType, position, player, replace);
+@@ -279,12 +287,64 @@ public class BuildingWorkerMovable extends CivilianMovable implements IBuildingW
+ 	protected static <T extends BuildingWorkerMovable> Node<T> preSearchPathNoWarning(boolean dijkstra, ESearchType searchType) {
+ 		return BehaviorTreeHelper.condition(mov -> {
+ 			ShortPoint2D workAreaCenter = mov.building.getWorkAreaCenter();
++			mov.rememberWorkAreaCenter(workAreaCenter);
+ 
+-			return mov.preSearchPath(dijkstra, workAreaCenter.x, workAreaCenter.y, mov.building.getBuildingVariant().getWorkRadius(),
++			boolean found = mov.preSearchPath(dijkstra, workAreaCenter.x, workAreaCenter.y, mov.building.getBuildingVariant().getWorkRadius(),
+ 					searchType);
++			if (found) { // there is work (e.g. planting), so there is no reason to complain
++				mov.searchFailedCtr = 0;
++				mov.building.setCannotWork(false);
++			}
++			return found;
+ 		});
+ 	}
+ 
++	protected void rememberWorkAreaCenter(ShortPoint2D center) {
++		if (lastWorkAreaCenter != null && !lastWorkAreaCenter.equals(center)) {
++			formerWorkAreaCenters.remove(lastWorkAreaCenter);
++			formerWorkAreaCenters.add(lastWorkAreaCenter);
++			if (formerWorkAreaCenters.size() > MAX_FORMER_WORK_AREA_CENTERS) {
++				formerWorkAreaCenters.remove(0);
++			}
++		}
++		lastWorkAreaCenter = center;
++	}
++
++	/**
++	 * Like {@link #preSearchPath}, but for harvesting: if there is nothing ripe in the current work area, the former work areas and the default work
++	 * area are searched too. So crops that were planted before the work area was moved are harvested first, instead of rotting away.
++	 */
++	protected static <T extends BuildingWorkerMovable> Node<T> preSearchHarvestPath(ESearchType searchType) {
++		return selector(
++				preSearchPathNoWarning(true, searchType),
++				condition(mov -> {
++					if (mov.preSearchHarvestElsewhere(searchType)) {
++						mov.searchFailedCtr = 0;
++						mov.building.setCannotWork(false);
++						return true;
++					}
++					return false;
++				}),
++				preSearchPath(true, searchType) // nothing to harvest at all: usual handling of failed searches
++		);
++	}
++
++	protected boolean preSearchHarvestElsewhere(ESearchType searchType) {
++		short radius = building.getBuildingVariant().getWorkRadius();
++		ShortPoint2D current = building.getWorkAreaCenter();
++		List<ShortPoint2D> bases = new ArrayList<>(formerWorkAreaCenters);
++		bases.add(building.getBuildingVariant().getDefaultWorkcenter().calculatePoint(building.getPosition()));
++		for (ShortPoint2D base : bases) {
++			if (base.equals(current) || !isInGrid(base)) {
++				continue;
++			}
++			if (preSearchPath(true, base.x, base.y, radius, searchType)) {
++				return true;
++			}
++		}
++		return false;
++	}
++
+ 	protected static <T extends BuildingWorkerMovable> Node<T> preSearchPath(boolean dijkstra, ESearchType searchType) {
+ 		return selector(
+ 				sequence(
+@@ -298,7 +358,10 @@ public class BuildingWorkerMovable extends CivilianMovable implements IBuildingW
+ 					action(mov -> {
+ 						mov.searchFailedCtr++;
+ 
+-						if (mov.searchFailedCtr > 10) {
++						if (mov.isTimeToMoveWorkArea() && mov.moveWorkAreaToWork(searchType, true)) {
++							mov.searchFailedCtr = 0;
++							mov.building.setCannotWork(false);
++						} else if (mov.searchFailedCtr > 10) {
+ 							mov.building.setCannotWork(true);
+ 							mov.player.showMessage(SimpleMessage.cannotFindWork(mov.building));
+ 						}
+@@ -308,6 +371,146 @@ public class BuildingWorkerMovable extends CivilianMovable implements IBuildingW
+ 		);
+ 	}
+ 
++	// ---- Automatic work area: if there is nothing to do in the current work area, the building looks for work nearby and moves its work area.
++
++	/** The first automatic attempt is made after this many failed searches (before the "cannot find work" message would appear). */
++	private static final int AUTO_AREA_FIRST_TRY = 2;
++	/** After that, another attempt is made after this many failed searches (about 2 seconds). */
++	private static final int AUTO_AREA_RETRY_PERIOD = 34;
++
++	protected boolean isTimeToMoveWorkArea() {
++		return searchFailedCtr >= AUTO_AREA_FIRST_TRY && (searchFailedCtr - AUTO_AREA_FIRST_TRY) % AUTO_AREA_RETRY_PERIOD == 0;
++	}
++
++	/**
++	 * A node that moves the work area to a place where there is work for the given search types (tried in the given order).
++	 */
++	protected static <T extends BuildingWorkerMovable> Node<T> autoWorkArea(ESearchType... searchTypes) {
++		return action(mov -> {
++			for (ESearchType searchType : searchTypes) {
++				if (mov.moveWorkAreaToWork(searchType, false)) {
++					mov.searchFailedCtr = 0;
++					mov.building.setCannotWork(false);
++					return;
++				}
++			}
++		});
++	}
++
++	/**
++	 * Looks for work of the given type outside of the current work area and moves the work area there.
++	 * <ul>
++	 * <li>Trees, stones, fish, rivers (big areas): the area follows the nearest work within twice the work radius of the current center or the default
++	 * center, but not further than three times the work radius from the building.</li>
++	 * <li>Tree planting: like above, but with a smaller range.</li>
++	 * <li>Rice: the area follows the nearest swamp that can be planted or harvested within three times the work radius.</li>
++	 * <li>Bees: like rice, the area follows the nearest place for a hive (grass next to a tree) within twice the work radius.</li>
++	 * <li>Corn and wine (they work around the building): the area returns to the default center if there is work, otherwise it moves a bit to the
++	 * side, up to twice the work radius from the default center.</li>
++	 * </ul>
++	 *
++	 * @param searchType
++	 * 		The type of work.
++	 * @param onlyBigAreas
++	 * 		If true, only the types that do not have a separate "nothing to do" fallback in their behaviour are handled.
++	 * @return true if the work area was moved.
++	 */
++	protected boolean moveWorkAreaToWork(ESearchType searchType, boolean onlyBigAreas) {
++		BuildingVariant variant = building.getBuildingVariant();
++		short radius = variant.getWorkRadius();
++		if (radius <= 0) {
++			return false;
++		}
++
++		ShortPoint2D buildingPos = building.getPosition();
++		ShortPoint2D current = building.getWorkAreaCenter();
++		ShortPoint2D home = variant.getDefaultWorkcenter().calculatePoint(buildingPos);
++		if (current == null) {
++			return false;
++		}
++
++		int searchRadius;
++		int maxDistance;
++		boolean homeFirst = false;
++		ShortPoint2D limitCenter = buildingPos; // maxDistance is measured from here
++		switch (searchType) {
++		case CUTTABLE_TREE:
++		case CUTTABLE_STONE:
++		case FISHABLE:
++		case RIVER:
++			searchRadius = 2 * radius;
++			maxDistance = 3 * radius;
++			break;
++		case PLANTABLE_TREE:
++			searchRadius = (3 * radius) / 2;
++			maxDistance = 2 * radius;
++			break;
++		case PLANTABLE_RICE:
++		case HARVESTABLE_RICE:
++			if (onlyBigAreas) {
++				return false;
++			}
++			searchRadius = 3 * radius;
++			maxDistance = 3 * radius;
++			break;
++		case PLANTABLE_HIVE:
++		case HARVESTABLE_HIVE:
++			// hives need grass next to a tree, so the beekeeper follows the nearest suitable place
++			if (onlyBigAreas) {
++				return false;
++			}
++			searchRadius = 2 * radius;
++			maxDistance = 2 * radius;
++			break;
++		case CUTTABLE_CORN:
++		case PLANTABLE_CORN:
++		case HARVESTABLE_WINE:
++		case PLANTABLE_WINE:
++			// work around the building: go back to the default center if there is something to do there, otherwise move the area a bit
++			// to the side (e.g. if the default area is blocked by a building)
++			if (onlyBigAreas) {
++				return false;
++			}
++			homeFirst = true;
++			limitCenter = home;
++			searchRadius = 2 * radius;
++			maxDistance = 2 * radius; // measured from the default center, because that is already some way from the building
++			break;
++		default:
++			return false;
++		}
++
++		if (homeFirst && !current.equals(home) && isInGrid(home) && grid.searchDijkstra(this, home.x, home.y, radius, searchType) != null) {
++			building.setWorkAreaCenter(home);
++			if (building.getWorkAreaCenter().equals(home)) {
++				return true;
++			}
++		}
++
++		ShortPoint2D[] bases = current.equals(home) ? new ShortPoint2D[] { current } : new ShortPoint2D[] { current, home };
++		for (ShortPoint2D base : bases) {
++			if (!isInGrid(base)) {
++				continue;
++			}
++			Path path = grid.searchDijkstra(this, base.x, base.y, (short) searchRadius, searchType);
++			if (path == null) {
++				continue;
++			}
++			ShortPoint2D target = path.getTargetPosition();
++			if (!target.equals(current) && limitCenter.getOnGridDistTo(target) <= maxDistance) {
++				building.setWorkAreaCenter(target);
++				if (building.getWorkAreaCenter().equals(target)) {
++					return true;
++				}
++			}
++		}
++		return false;
++	}
++
++	private boolean isInGrid(ShortPoint2D point) {
++		return point.x >= 0 && point.y >= 0 && point.x < grid.getWidth() && point.y < grid.getHeight();
++	}
++
+ 	protected boolean tryTakingResource() {
+ 		if(building.getBuildingVariant().isVariantOf(EBuildingType.FISHER)) {
+ 			EDirection fishDirection = getDirection();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java
+index f69e1c4b1..45f79d30f 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java
+@@ -242,7 +242,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 						selector(
+ 							sequence(
+ 								outputStackNotFull(EMaterialType.WINE),
+-								preSearchPath(true, ESearchType.HARVESTABLE_WINE),
++								preSearchHarvestPath(ESearchType.HARVESTABLE_WINE),
+ 								ignoreFailure(
+ 									sequence(
+ 										setMaterialNode(EMaterialType.BASKET),
+@@ -284,6 +284,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 								)
+ 							),
+ 							sequence(
++								autoWorkArea(ESearchType.HARVESTABLE_WINE, ESearchType.PLANTABLE_WINE),
+ 								sleep(1000),
+ 								alwaysFail()
+ 							)
+@@ -303,7 +304,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 						selector(
+ 							sequence(
+ 								outputStackNotFull(EMaterialType.CROP),
+-								preSearchPath(true, ESearchType.CUTTABLE_CORN),
++								preSearchHarvestPath(ESearchType.CUTTABLE_CORN),
+ 								ignoreFailure(
+ 									sequence(
+ 										show(),
+@@ -360,6 +361,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 								)
+ 							),
+ 							sequence(
++								autoWorkArea(ESearchType.CUTTABLE_CORN, ESearchType.PLANTABLE_CORN),
+ 								sleep(1000),
+ 								alwaysFail()
+ 							)
+@@ -573,7 +575,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 						selector(
+ 							sequence(
+ 								outputStackNotFull(EMaterialType.RICE),
+-								preSearchPath(true, ESearchType.HARVESTABLE_RICE),
++								preSearchHarvestPath(ESearchType.HARVESTABLE_RICE),
+ 								ignoreFailure(
+ 									sequence(
+ 										condition(mov -> true),
+@@ -611,6 +613,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 								)
+ 							),
+ 							sequence(
++								autoWorkArea(ESearchType.PLANTABLE_RICE, ESearchType.HARVESTABLE_RICE),
+ 								sleep(1000),
+ 								alwaysFail()
+ 							)
+@@ -630,7 +633,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 						selector(
+ 							sequence(
+ 								outputStackNotFull(EMaterialType.HONEY),
+-								preSearchPath(true, ESearchType.HARVESTABLE_HIVE),
++								preSearchHarvestPath(ESearchType.HARVESTABLE_HIVE),
+ 								ignoreFailure(
+ 									sequence(
+ 										show(),
+@@ -670,6 +673,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 								)
+ 							),
+ 							sequence(
++								autoWorkArea(ESearchType.HARVESTABLE_HIVE, ESearchType.PLANTABLE_HIVE),
+ 								sleep(1000),
+ 								alwaysFail()
+ 							)

@@ -1,8 +1,8 @@
 diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
-index 84285a5..0a42c57 100644
+index 84285a5f5..4466ffbda 100644
 --- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
 +++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
-@@ -36,5 +36,10 @@ public enum EMessageType {
+@@ -36,5 +36,20 @@ public enum EMessageType {
  	/**
  	 * The worker of a building was not able to find a place to execute his action in his work are for some time.
  	 */
@@ -12,13 +12,23 @@ index 84285a5..0a42c57 100644
 +	/**
 +	 * A military building has been finished but no soldier is available to occupy it.
 +	 */
-+	NO_SOLDIER_AVAILABLE
++	NO_SOLDIER_AVAILABLE,
++
++	/**
++	 * A building has been finished but its worker cannot be created because the tool for this profession is missing.
++	 */
++	MISSING_TOOL,
++
++	/**
++	 * A building has been finished but its worker cannot be created because there is no free carrier to become the worker.
++	 */
++	NO_FREE_BEARER
  }
 diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
-index f805b43..80baee1 100644
+index f805b4397..0fb7a759a 100644
 --- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
 +++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
-@@ -139,6 +139,17 @@ public class SimpleMessage implements IMessage {
+@@ -139,6 +139,42 @@ public class SimpleMessage implements IMessage {
  		return new SimpleMessage(EMessageType.NOTHING_FOUND_IN_SEARCH_AREA, "cannot_find_work_" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
  	}
  
@@ -33,11 +43,36 @@ index f805b43..80baee1 100644
 +		return new SimpleMessage(EMessageType.NO_SOLDIER_AVAILABLE, "no_soldier_available_" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
 +	}
 +
++	/**
++	 * Create a new message that a building cannot be occupied because the tool of its worker is missing.
++	 *
++	 * @param building
++	 * 		The building
++	 * @param tool
++	 * 		The missing tool
++	 * @return The message object
++	 */
++	public static IMessage missingTool(IBuilding building, EMaterialType tool) {
++		// the text is composed from the building and the tool, see MapContent
++		return new SimpleMessage(EMessageType.MISSING_TOOL, "missing_tool|" + building.getBuildingVariant().getType() + "|" + tool, (byte) -1, building.getPosition());
++	}
++
++	/**
++	 * Create a new message that a building cannot be occupied because there is no free carrier who could become its worker.
++	 *
++	 * @param building
++	 * 		The building
++	 * @return The message object
++	 */
++	public static IMessage noFreeBearer(IBuilding building) {
++		return new SimpleMessage(EMessageType.NO_FREE_BEARER, "no_free_bearer|" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
++	}
++
  	/**
  	 *
  	 * @param at
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
-index 247a98c..2d680b6 100644
+index 247a98ccd..74208c013 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
 @@ -16,9 +16,12 @@ package jsettlers.graphics.map;
@@ -73,7 +108,7 @@ index 247a98c..2d680b6 100644
  	private static final int MESSAGE_OFFSET_Y = 30;
  	private static final long GOTO_MARK_TIME = 1500;
  	private static final long DOUBLE_CLICK_TIME = 500;
-@@ -443,10 +450,81 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+@@ -443,10 +450,92 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
  		drawer.drawString((windowWidth - drawer.getWidth(msg)) / 2, windowHeight - 7 * EFontSize.HEADLINE.getSize(), color, msg);
  	}
  
@@ -122,7 +157,16 @@ index 247a98c..2d680b6 100644
 +		if (m.getType() == EMessageType.CHAT || !text.equals(label)) {
 +			return text;
 +		}
-+		if (label.startsWith("cannot_find_work_")) {
++		if (label.startsWith("missing_tool|")) {
++			String[] parts = label.split("\\|");
++			String toolKey = "material_" + parts[2];
++			String tool = Labels.getString(toolKey);
++			tool = tool.equals(toolKey) ? capitalizeWords(parts[2]) : tool;
++			return Labels.getString("message_missing_tool", buildingNameOf(parts[1]), tool.toLowerCase(Locale.ROOT));
++		} else if (label.startsWith("no_free_bearer|")) {
++			String[] parts = label.split("\\|");
++			return Labels.getString("message_no_free_bearer", buildingNameOf(parts[1]));
++		} else if (label.startsWith("cannot_find_work_")) {
 +			return buildingNameOf(label.substring("cannot_find_work_".length())) + ": no work found in its work area.";
 +		} else if (label.startsWith("no_soldier_available_")) {
 +			return buildingNameOf(label.substring("no_soldier_available_".length())) + " has no soldier to occupy it.";
@@ -138,6 +182,8 @@ index 247a98c..2d680b6 100644
 +			return new Color(1f, 0.45f, 0.35f, alpha);
 +		case NOTHING_FOUND_IN_SEARCH_AREA:
 +		case NO_SOLDIER_AVAILABLE:
++		case MISSING_TOOL:
++		case NO_FREE_BEARER:
 +			return new Color(1f, 0.8f, 0.3f, alpha);
 +		case MINERALS:
 +			return new Color(0.6f, 1f, 0.6f, alpha);
@@ -155,7 +201,7 @@ index 247a98c..2d680b6 100644
  
  		float offsetY;
  		float offsetX;
-@@ -454,7 +532,7 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+@@ -454,7 +543,7 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
  		int messageIndex;
  		if(textDrawPosition == ETextDrawPosition.DESKTOP) {
  			offsetY = MESSAGE_OFFSET_Y;
@@ -164,7 +210,7 @@ index 247a98c..2d680b6 100644
  			yDirection = 1;
  			messageIndex = 0;
  		} else {
-@@ -466,8 +544,9 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+@@ -466,8 +555,9 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
  
  		for (IMessage m : messenger.getMessages()) {
  			float x = offsetX;
@@ -175,7 +221,7 @@ index 247a98c..2d680b6 100644
  			if (m.getSender() >= 0) {
  				String name = getPlayername(m.getSender()) + ":";
  				Color color = MapDrawContext.getPlayerColor(m.getSender());
-@@ -479,10 +558,15 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+@@ -479,10 +569,15 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
  				x += width + 10;
  			}
  
@@ -192,7 +238,7 @@ index 247a98c..2d680b6 100644
  	}
  
  	private String getPlayername(byte sender) {
-@@ -888,6 +972,15 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+@@ -888,6 +983,15 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
  
  	private Optional<Action> getActionForCommand(GOCommandEvent commandEvent) {
  		UIPoint position = commandEvent.getCommandPosition();
@@ -209,7 +255,7 @@ index 247a98c..2d680b6 100644
  			if (commandEvent.isSelecting()) {
  				return controls.getActionForSelect(position);
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/IControls.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/IControls.java
-index 70a2723..3582ff8 100644
+index 70a272356..3582ff844 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/IControls.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/IControls.java
 @@ -63,6 +63,15 @@ public interface IControls extends IMapInterfaceListener {
@@ -229,7 +275,7 @@ index 70a2723..3582ff8 100644
  	 * Gets the description for a given point, e.g. for tooltipps. May be called for any position.
  	 *
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
-index 092b2f3..7b18afe 100644
+index 092b2f34d..7b18afe1d 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
 @@ -181,6 +181,11 @@ public class OriginalControls implements IControls {
@@ -245,10 +291,10 @@ index 092b2f3..7b18afe 100644
  	public boolean containsPoint(UIPoint position) {
  		float width = uiBase.getPosition().getWidth();
 diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
-index 470af44..9dbf08e 100644
+index 470af449d..b9e221d48 100644
 --- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
 +++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
-@@ -379,6 +379,11 @@ cannot_find_work_FARM = Your grain farm can't find find enough spots to plant wh
+@@ -379,6 +379,13 @@ cannot_find_work_FARM = Your grain farm can't find find enough spots to plant wh
  cannot_find_work_WINEGROWER = Your winery can't find enough spots for growing vines in its work area.
  cannot_find_work_WATERWORKS = Your waterworks can't find any river in its work area.
  cannot_find_work_FISHER = Your fisher can't find any sea in its work area.
@@ -257,11 +303,13 @@ index 470af44..9dbf08e 100644
 +no_soldier_available_TOWER = Your guard tower can't be occupied: no soldier is available.
 +no_soldier_available_BIG_TOWER = Your large guard tower can't be occupied: no soldier is available.
 +no_soldier_available_CASTLE = Your castle can't be occupied: no soldier is available.
++message_missing_tool = %s can't be occupied: tool missing (%s).
++message_no_free_bearer = %s can't be occupied: no free carrier is available.
  action_firerer_slow = Warning! The game is responding slowly.
  
  # progress display
 diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
-index 3d10b59..d81dc28 100644
+index 3d10b591e..d81dc280a 100644
 --- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
 +++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
 @@ -67,6 +67,10 @@ public class OccupyingBuilding extends Building implements IBuilding.IOccupied,
@@ -309,3 +357,143 @@ index 3d10b59..d81dc28 100644
  	private void increaseDoorHealth() {
  		if (doorHealth < 1 && !inFight) {
  			doorHealth = Math.min(1, doorHealth + Constants.TOWER_DOOR_REGENERATION);
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/workers/WorkerBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/workers/WorkerBuilding.java
+index 75e5e3d11..a7f86b8ed 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/workers/WorkerBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/workers/WorkerBuilding.java
+@@ -20,6 +20,7 @@ import java.util.List;
+ import jsettlers.common.buildings.EBuildingType;
+ import jsettlers.common.mapobject.EMapObjectType;
+ import jsettlers.common.material.EMaterialType;
++import jsettlers.common.menu.messages.IMessage;
+ import jsettlers.common.position.ShortPoint2D;
+ import jsettlers.common.utils.Tuple;
+ import jsettlers.logic.buildings.IBuildingsGrid;
+@@ -61,6 +62,11 @@ public class WorkerBuilding extends WorkAreaBuilding implements IWorkerRequestBu
+ 		return -1; // no scheduling required
+ 	}
+ 
++	@Override
++	public void showMessage(IMessage message) {
++		getPlayer().showMessage(message);
++	}
++
+ 	private void requestWorker() {
+ 		super.grid.requestBuildingWorker(super.getBuildingVariant().getWorkerType(), this);
+ 	}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+index ef0277490..10294909a 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+@@ -19,6 +19,7 @@ import java.util.Iterator;
+ import java.util.LinkedList;
+ 
+ import jsettlers.common.material.EMaterialType;
++import jsettlers.common.menu.messages.SimpleMessage;
+ import jsettlers.common.movable.EDirection;
+ import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.player.IPlayer;
+@@ -314,6 +315,17 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 	private void handleWorkerCreationRequests() {
+ 		Iterator<WorkerCreationRequest> iterator = workerCreationRequests.iterator();
+ 
++		if (joblessBearer.isEmpty()) {
++			// every new worker needs a free carrier, tell the player if one is missing for a building
++			for (WorkerCreationRequest request : workerCreationRequests) {
++				if (request instanceof WorkerRequest && request.isRequestAlive()) {
++					WorkerRequest workerRequest = (WorkerRequest) request;
++					workerRequest.warnPlayer(SimpleMessage.noFreeBearer(workerRequest.building));
++				}
++			}
++			return;
++		}
++
+ 		while(iterator.hasNext() && !joblessBearer.isEmpty()) {
+ 			WorkerCreationRequest workerCreationRequest = iterator.next();
+ 			if (!workerCreationRequest.isRequestAlive() || tryToCreateWorker(workerCreationRequest)) {
+@@ -337,6 +349,10 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 
+ 			if(offer == null) { // no tool found => cannot create worker
+ 				workerCreationRequest.setToolProductionRequired(true);
++				if (workerCreationRequest instanceof WorkerRequest) {
++					WorkerRequest workerRequest = (WorkerRequest) workerCreationRequest;
++					workerRequest.warnPlayer(SimpleMessage.missingTool(workerRequest.building, tool));
++				}
+ 				return false;
+ 			}
+ 		}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java
+index 7ae61823a..d7e8a6f9c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java
+@@ -15,6 +15,7 @@
+ package jsettlers.logic.map.grid.partition.manager.manageables.interfaces;
+ 
+ import jsettlers.common.buildings.BuildingVariant;
++import jsettlers.common.menu.messages.IMessage;
+ import jsettlers.common.buildings.EBuildingType;
+ import jsettlers.common.buildings.IBuilding;
+ import jsettlers.common.mapobject.EMapObjectType;
+@@ -64,5 +65,10 @@ public interface IWorkerRequestBuilding extends IPlayerable, ILocatable, IBuildi
+ 
+ 	void setCannotWork(boolean cannotWork);
+ 
++	/**
++	 * Shows a message to the owner of this building.
++	 */
++	void showMessage(IMessage message);
++
+ 	void addMapObjectCleanupPosition(ShortPoint2D pos, EMapObjectType objectType);
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/WorkerRequest.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/WorkerRequest.java
+index 3a9b1b99d..d1fd4121a 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/WorkerRequest.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/WorkerRequest.java
+@@ -16,9 +16,11 @@ package jsettlers.logic.map.grid.partition.manager.objects;
+ 
+ import java.io.Serializable;
+ 
++import jsettlers.common.menu.messages.IMessage;
+ import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.position.ILocatable;
+ import jsettlers.common.position.ShortPoint2D;
++import jsettlers.logic.constants.MatchConstants;
+ import jsettlers.logic.map.grid.partition.manager.manageables.interfaces.IWorkerRequestBuilding;
+ 
+ public final class WorkerRequest extends WorkerCreationRequest implements ILocatable, Serializable {
+@@ -28,6 +30,10 @@ public final class WorkerRequest extends WorkerCreationRequest implements ILocat
+ 	public final IWorkerRequestBuilding building;
+ 	public boolean creationRequested = false;
+ 
++	private static final int WARNING_DELAY = 10 * 1000;
++	private static final int WARNING_REPEAT = 120 * 1000;
++	private int nextWarningTime = 0;
++
+ 	public WorkerRequest(EMovableType movableType, IWorkerRequestBuilding building) {
+ 		this.building = building;
+ 		this.movableType = movableType;
+@@ -43,6 +49,24 @@ public final class WorkerRequest extends WorkerCreationRequest implements ILocat
+ 		return movableType + "    " + creationRequested + "     " + building.getBuildingVariant();
+ 	}
+ 
++	/**
++	 * Tells the player that this building waits for its worker for a long time. The message is shown after a delay and then repeated from time to
++	 * time, as long as the request is waiting.
++	 *
++	 * @param message
++	 * 		The message to show.
++	 */
++	public void warnPlayer(IMessage message) {
++		int now = MatchConstants.clock().getTime();
++		if (nextWarningTime == 0) {
++			nextWarningTime = now + WARNING_DELAY;
++		}
++		if (now >= nextWarningTime) {
++			nextWarningTime = now + WARNING_REPEAT;
++			building.showMessage(message);
++		}
++	}
++
+ 	@Override
+ 	public boolean isRequestAlive() {
+ 		return !building.isDestroyed();

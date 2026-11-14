@@ -6,7 +6,7 @@
 > This project is not affiliated with, endorsed by or supported by Ubisoft, Blue Byte or the upstream JSettlers project.
 > The game data (graphics and sound) of *The Settlers III* is **not included** - you need your own copy (see below).
 
-Current version: **0.6.2-alpha** (alpha: expect bugs; saved games may become invalid in future versions).
+Current version: **0.6.3-alpha** (alpha: expect bugs; saved games may become invalid in future versions).
 See the [changelog](CHANGELOG.md) for everything that differs from upstream.
 
 ## What you need
@@ -17,7 +17,7 @@ See the [changelog](CHANGELOG.md) for everything that differs from upstream.
   Tested with the GOG version 1.60 data.
 
 ## Installation
-1. Download `JSettlers-macOS-v0.6.2-alpha-arm64.dmg` from the [Releases](../../releases) page.
+1. Download `JSettlers-macOS-v0.6.3-alpha-arm64.dmg` from the [Releases](../../releases) page.
 2. Open the DMG and drag **JSettlers** to the **Applications** folder.
 3. Start JSettlers. macOS may say the app is damaged or from an unidentified developer. It is not signed by Apple (it is signed ad hoc),
    so you have to allow it once. Do **one** of these:
@@ -45,9 +45,16 @@ Everything the game writes is in `~/Library/Application Support/JSettlers`:
 
 ## Language
 The game starts in **English**. To change the language open **Settings** in the main menu, choose a language in the **Language** list and click OK;
-the menus switch immediately, no restart is needed. Available languages: **English** and **Czech (Cestina)**.
+the menus switch immediately, no restart is needed. Available languages: **English** and **Czech (Čeština)**.
 Texts that are not translated are shown in English. Translations are plain text files
 (`labels_xx.properties`); contributions of other languages are welcome (see the [changelog](CHANGELOG.md) of 0.6.1).
+
+## HD graphics (optional)
+**Settings > HD graphics = Yes**, then restart the game (the default is No). At the first start the game enlarges the graphics of **your own** game files
+(units, buildings, objects, terrain and icons) 2x on your computer. This takes a few minutes; close the window when it is done. The enlarged images are stored only
+in `~/Library/Application Support/JSettlers/hd`; they are never part of this project or of the DMG. Delete that folder to start over.
+If the app contains the AI engine ([Real-ESRGAN ncnn Vulkan](https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan), MIT license) the enlarged images have
+better colours, otherwise a built-in enlarger is used.
 
 ## Tips
 - **Control + two-finger click** (the secondary click of your trackpad; with a mouse: Control + right click) = forced move: the selected units walk
@@ -59,6 +66,16 @@ Texts that are not translated are shown in English. Translations are plain text 
   (Control + number with nothing selected empties it); groups are not saved with the game. Buildings cannot be stored.
 - **Peace time:** when creating a game (single player, or as the host of a multiplayer game) you can choose a peace time of 10 to 60 minutes. Nobody
   attacks until it is over; the countdown is shown at the top right, left of the zoom. It is not saved with the game.
+- **Automatic work area:** lumberjacks, stonecutters, fishers, waterworks, foresters, rice farms and beekeepers move their work area to the nearest
+  work when nothing is left to do, so you do not have to click it again and again; farms and winegrowers return to their default area or move a bit
+  to the side of an obstacle. You can still set the work area by hand. Farmers, winegrowers, rice farmers and beekeepers harvest ripe crops of
+  former work areas first, so they do not rot.
+- **Messages about missing workers:** if a building cannot be occupied you are told why: no tool, or no free settler (carriers reserved by the minimum
+  carrier setting are not free). The same message appears if the barracks cannot arm soldiers because no free settler is left; barracks never take
+  settlers from the reserved carriers.
+- Thieves and geologists can be turned back into carriers (like pioneers) with a button in the selection panel; the converted units stay selected.
+- The tool smithy and the weapon smithy show the finished products lying at the building. The tool smithy also produces shovels and hammers up to the
+  numbers of diggers and bricklayers set in the settlers settings.
 - A plain two-finger click on a spot is the normal move command. A thief ordered next to a pile of enemy goods steals it and carries it home.
 - The **zoom** is shown at the top right, left of the frame rate (100% = original size, one image pixel per screen pixel).
 - Click on a message at the bottom of the screen to jump to the place it is about.
@@ -75,7 +92,8 @@ This build is [PR #92](https://github.com/paulwedeck/settlers-remake/pull/92) (A
 [`patches`](patches), listed in the [changelog](CHANGELOG.md): LAN multiplayer on macOS, readable bigger text, building costs in the build menu,
 useful messages, correct game speed, better soldier behavior, fixes for the "Gifts of the gods" spell, end-of-game statistics,
 the Amazon and Asian storage/market buildings, a language selection (English, Czech), thief fixes, a zoom indicator, control groups
-(Control + number) and a selectable peace time.
+(Control + number), a selectable peace time, optional HD graphics, an automatic work area, faster growth of crops and more messages
+about missing tools and settlers.
 
 ## Building it yourself
 You need a Mac with Apple Silicon, git, Xcode command line tools and JDK 17 (`brew install --cask temurin@17`).

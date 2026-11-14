@@ -10,8 +10,8 @@
 #
 # What the script needs: a Mac with Apple Silicon, git, JDK 17 (brew install --cask temurin@17) and an internet
 # connection (Gradle downloads the dependencies). The results are placed in:
-#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.2-alpha-arm64.dmg       (the app, this is what users download)
-#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.2-alpha-source.zip      (complete, already patched source code)
+#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.3-alpha-arm64.dmg       (the app, this is what users download)
+#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.3-alpha-source.zip      (complete, already patched source code)
 #
 # How it works: it downloads the upstream source code (https://github.com/paulwedeck/settlers-remake, the state of
 # pull request #92 "Apple Silicon support", commit 47d1d4e), applies the patches embedded below (the same patches
@@ -19,7 +19,7 @@
 #
 set -euo pipefail
 
-RELEASE_VERSION="0.6.2-alpha"   # shown in the game (window title and top right corner) and used in the file names
+RELEASE_VERSION="0.6.3-alpha"   # shown in the game (window title and top right corner) and used in the file names
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -86,7 +86,7 @@ find . -name CommitInfo.java -path "*generated*" -delete   # make sure the label
 # 05 Text: 50 % bigger (setting font-scale), sharp glyphs rendered in their final size, no coloured fringe.
 # 06 Build menu: hovering over a building shows its cost.
 # 07 Tooltips are placed next to the mouse cursor (settings tooltip-offset-x/y).
-# 08 Messages: readable texts, new "no soldier available" message, colours, click on a message jumps to its place.
+# 08 Messages: readable texts, new messages ("no soldier available", "tool missing", "no free settler"), colours, click on a message jumps to its place.
 # 09 Messages are placed right of the side panel (setting message-offset-x); the settings file is found more reliably.
 # 10 Game speed 1.0x is really 1.0x (it was 0.9x) and the frame rate limit is accurate (60 was ~52).
 # 11 Amazon storage building: the shadow was drawn six times on top of itself and came out black.
@@ -95,6 +95,19 @@ find . -name CommitInfo.java -path "*generated*" -delete   # make sure the label
 # 14 Zoom indicator ("Zoom: 100%") left of the frame rate, version and time at the top right of the screen.
 # 15 Control groups: Control + 1..0 stores the selected units (soldiers, thieves, pioneers, geologists, ...), 1..0 selects them again.
 # 16 Peace time: selectable (10-60 minutes) when a game is created; countdown at the top right; nobody attacks until it is over.
+# 17 HD graphics (off by default, switch in Settings): units, buildings, objects, terrain and icons are enlarged 2x on the player's own computer
+#    (Application Support/JSettlers/hd), with the built-in enlarger or the optional AI engine (Real-ESRGAN).
+# 18 Tool smithy and weapon smithy panels show the finished products lying at the building (icon + count per kind; extra rows if there are many);
+#    the tool smithy no longer makes tools that are already lying there waiting to be picked up
+# 19 Automatic work area: lumberjack, stonecutter, fisher, waterworks, forester, rice farm and beekeeper (bigger area) move their work area to the nearest work when
+#    there is nothing left to do; farm and winegrower return to their default area or move a bit to the side of an obstacle; no more false
+#    "cannot find work" messages. Farm, winegrower, rice farm and beekeeper harvest ripe crops of former work areas first, so they do not rot.
+# 20 Thieves and geologists can be turned back into carriers (like pioneers); converted units stay selected; long button texts fit.
+# 21 Faster growth: corn, wine, rice and beehives grow about a third faster; farmers, winegrowers, rice farmers and beekeepers pause 2 s
+#    instead of 8 s after each job.
+# 22 "No free settler" messages also appear when carriers are reserved by the minimum carrier setting and for barracks (arming);
+#    barracks only arm free settlers, never carriers reserved by the minimum carrier setting;
+#    the tool smithy also produces shovels and hammers up to the digger/bricklayer numbers set in the settings.
 say "Applying the patches"
 mkdir -p "$WORK/patches"
 cat > "$WORK/patches/01-lan-multiplayer-broadcast.patch" <<'PATCH_EOF'
@@ -895,10 +908,10 @@ index 25b8621..247a98c 100644
 PATCH_EOF
 cat > "$WORK/patches/08-in-game-messages.patch" <<'PATCH_EOF'
 diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
-index 84285a5..0a42c57 100644
+index 84285a5f5..4466ffbda 100644
 --- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
 +++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
-@@ -36,5 +36,10 @@ public enum EMessageType {
+@@ -36,5 +36,20 @@ public enum EMessageType {
  	/**
  	 * The worker of a building was not able to find a place to execute his action in his work are for some time.
  	 */
@@ -908,13 +921,23 @@ index 84285a5..0a42c57 100644
 +	/**
 +	 * A military building has been finished but no soldier is available to occupy it.
 +	 */
-+	NO_SOLDIER_AVAILABLE
++	NO_SOLDIER_AVAILABLE,
++
++	/**
++	 * A building has been finished but its worker cannot be created because the tool for this profession is missing.
++	 */
++	MISSING_TOOL,
++
++	/**
++	 * A building has been finished but its worker cannot be created because there is no free carrier to become the worker.
++	 */
++	NO_FREE_BEARER
  }
 diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
-index f805b43..80baee1 100644
+index f805b4397..0fb7a759a 100644
 --- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
 +++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
-@@ -139,6 +139,17 @@ public class SimpleMessage implements IMessage {
+@@ -139,6 +139,42 @@ public class SimpleMessage implements IMessage {
  		return new SimpleMessage(EMessageType.NOTHING_FOUND_IN_SEARCH_AREA, "cannot_find_work_" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
  	}
  
@@ -929,11 +952,36 @@ index f805b43..80baee1 100644
 +		return new SimpleMessage(EMessageType.NO_SOLDIER_AVAILABLE, "no_soldier_available_" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
 +	}
 +
++	/**
++	 * Create a new message that a building cannot be occupied because the tool of its worker is missing.
++	 *
++	 * @param building
++	 * 		The building
++	 * @param tool
++	 * 		The missing tool
++	 * @return The message object
++	 */
++	public static IMessage missingTool(IBuilding building, EMaterialType tool) {
++		// the text is composed from the building and the tool, see MapContent
++		return new SimpleMessage(EMessageType.MISSING_TOOL, "missing_tool|" + building.getBuildingVariant().getType() + "|" + tool, (byte) -1, building.getPosition());
++	}
++
++	/**
++	 * Create a new message that a building cannot be occupied because there is no free carrier who could become its worker.
++	 *
++	 * @param building
++	 * 		The building
++	 * @return The message object
++	 */
++	public static IMessage noFreeBearer(IBuilding building) {
++		return new SimpleMessage(EMessageType.NO_FREE_BEARER, "no_free_bearer|" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
++	}
++
  	/**
  	 *
  	 * @param at
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
-index 247a98c..2d680b6 100644
+index 247a98ccd..74208c013 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
 @@ -16,9 +16,12 @@ package jsettlers.graphics.map;
@@ -969,7 +1017,7 @@ index 247a98c..2d680b6 100644
  	private static final int MESSAGE_OFFSET_Y = 30;
  	private static final long GOTO_MARK_TIME = 1500;
  	private static final long DOUBLE_CLICK_TIME = 500;
-@@ -443,10 +450,81 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+@@ -443,10 +450,92 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
  		drawer.drawString((windowWidth - drawer.getWidth(msg)) / 2, windowHeight - 7 * EFontSize.HEADLINE.getSize(), color, msg);
  	}
  
@@ -1018,7 +1066,16 @@ index 247a98c..2d680b6 100644
 +		if (m.getType() == EMessageType.CHAT || !text.equals(label)) {
 +			return text;
 +		}
-+		if (label.startsWith("cannot_find_work_")) {
++		if (label.startsWith("missing_tool|")) {
++			String[] parts = label.split("\\|");
++			String toolKey = "material_" + parts[2];
++			String tool = Labels.getString(toolKey);
++			tool = tool.equals(toolKey) ? capitalizeWords(parts[2]) : tool;
++			return Labels.getString("message_missing_tool", buildingNameOf(parts[1]), tool.toLowerCase(Locale.ROOT));
++		} else if (label.startsWith("no_free_bearer|")) {
++			String[] parts = label.split("\\|");
++			return Labels.getString("message_no_free_bearer", buildingNameOf(parts[1]));
++		} else if (label.startsWith("cannot_find_work_")) {
 +			return buildingNameOf(label.substring("cannot_find_work_".length())) + ": no work found in its work area.";
 +		} else if (label.startsWith("no_soldier_available_")) {
 +			return buildingNameOf(label.substring("no_soldier_available_".length())) + " has no soldier to occupy it.";
@@ -1034,6 +1091,8 @@ index 247a98c..2d680b6 100644
 +			return new Color(1f, 0.45f, 0.35f, alpha);
 +		case NOTHING_FOUND_IN_SEARCH_AREA:
 +		case NO_SOLDIER_AVAILABLE:
++		case MISSING_TOOL:
++		case NO_FREE_BEARER:
 +			return new Color(1f, 0.8f, 0.3f, alpha);
 +		case MINERALS:
 +			return new Color(0.6f, 1f, 0.6f, alpha);
@@ -1051,7 +1110,7 @@ index 247a98c..2d680b6 100644
  
  		float offsetY;
  		float offsetX;
-@@ -454,7 +532,7 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+@@ -454,7 +543,7 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
  		int messageIndex;
  		if(textDrawPosition == ETextDrawPosition.DESKTOP) {
  			offsetY = MESSAGE_OFFSET_Y;
@@ -1060,7 +1119,7 @@ index 247a98c..2d680b6 100644
  			yDirection = 1;
  			messageIndex = 0;
  		} else {
-@@ -466,8 +544,9 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+@@ -466,8 +555,9 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
  
  		for (IMessage m : messenger.getMessages()) {
  			float x = offsetX;
@@ -1071,7 +1130,7 @@ index 247a98c..2d680b6 100644
  			if (m.getSender() >= 0) {
  				String name = getPlayername(m.getSender()) + ":";
  				Color color = MapDrawContext.getPlayerColor(m.getSender());
-@@ -479,10 +558,15 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+@@ -479,10 +569,15 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
  				x += width + 10;
  			}
  
@@ -1088,7 +1147,7 @@ index 247a98c..2d680b6 100644
  	}
  
  	private String getPlayername(byte sender) {
-@@ -888,6 +972,15 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+@@ -888,6 +983,15 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
  
  	private Optional<Action> getActionForCommand(GOCommandEvent commandEvent) {
  		UIPoint position = commandEvent.getCommandPosition();
@@ -1105,7 +1164,7 @@ index 247a98c..2d680b6 100644
  			if (commandEvent.isSelecting()) {
  				return controls.getActionForSelect(position);
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/IControls.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/IControls.java
-index 70a2723..3582ff8 100644
+index 70a272356..3582ff844 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/IControls.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/IControls.java
 @@ -63,6 +63,15 @@ public interface IControls extends IMapInterfaceListener {
@@ -1125,7 +1184,7 @@ index 70a2723..3582ff8 100644
  	 * Gets the description for a given point, e.g. for tooltipps. May be called for any position.
  	 *
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
-index 092b2f3..7b18afe 100644
+index 092b2f34d..7b18afe1d 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
 @@ -181,6 +181,11 @@ public class OriginalControls implements IControls {
@@ -1141,10 +1200,10 @@ index 092b2f3..7b18afe 100644
  	public boolean containsPoint(UIPoint position) {
  		float width = uiBase.getPosition().getWidth();
 diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
-index 470af44..9dbf08e 100644
+index 470af449d..b9e221d48 100644
 --- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
 +++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
-@@ -379,6 +379,11 @@ cannot_find_work_FARM = Your grain farm can't find find enough spots to plant wh
+@@ -379,6 +379,13 @@ cannot_find_work_FARM = Your grain farm can't find find enough spots to plant wh
  cannot_find_work_WINEGROWER = Your winery can't find enough spots for growing vines in its work area.
  cannot_find_work_WATERWORKS = Your waterworks can't find any river in its work area.
  cannot_find_work_FISHER = Your fisher can't find any sea in its work area.
@@ -1153,11 +1212,13 @@ index 470af44..9dbf08e 100644
 +no_soldier_available_TOWER = Your guard tower can't be occupied: no soldier is available.
 +no_soldier_available_BIG_TOWER = Your large guard tower can't be occupied: no soldier is available.
 +no_soldier_available_CASTLE = Your castle can't be occupied: no soldier is available.
++message_missing_tool = %s can't be occupied: tool missing (%s).
++message_no_free_bearer = %s can't be occupied: no free carrier is available.
  action_firerer_slow = Warning! The game is responding slowly.
  
  # progress display
 diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
-index 3d10b59..d81dc28 100644
+index 3d10b591e..d81dc280a 100644
 --- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
 +++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
 @@ -67,6 +67,10 @@ public class OccupyingBuilding extends Building implements IBuilding.IOccupied,
@@ -1205,6 +1266,146 @@ index 3d10b59..d81dc28 100644
  	private void increaseDoorHealth() {
  		if (doorHealth < 1 && !inFight) {
  			doorHealth = Math.min(1, doorHealth + Constants.TOWER_DOOR_REGENERATION);
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/workers/WorkerBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/workers/WorkerBuilding.java
+index 75e5e3d11..a7f86b8ed 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/workers/WorkerBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/workers/WorkerBuilding.java
+@@ -20,6 +20,7 @@ import java.util.List;
+ import jsettlers.common.buildings.EBuildingType;
+ import jsettlers.common.mapobject.EMapObjectType;
+ import jsettlers.common.material.EMaterialType;
++import jsettlers.common.menu.messages.IMessage;
+ import jsettlers.common.position.ShortPoint2D;
+ import jsettlers.common.utils.Tuple;
+ import jsettlers.logic.buildings.IBuildingsGrid;
+@@ -61,6 +62,11 @@ public class WorkerBuilding extends WorkAreaBuilding implements IWorkerRequestBu
+ 		return -1; // no scheduling required
+ 	}
+ 
++	@Override
++	public void showMessage(IMessage message) {
++		getPlayer().showMessage(message);
++	}
++
+ 	private void requestWorker() {
+ 		super.grid.requestBuildingWorker(super.getBuildingVariant().getWorkerType(), this);
+ 	}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+index ef0277490..10294909a 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+@@ -19,6 +19,7 @@ import java.util.Iterator;
+ import java.util.LinkedList;
+ 
+ import jsettlers.common.material.EMaterialType;
++import jsettlers.common.menu.messages.SimpleMessage;
+ import jsettlers.common.movable.EDirection;
+ import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.player.IPlayer;
+@@ -314,6 +315,17 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 	private void handleWorkerCreationRequests() {
+ 		Iterator<WorkerCreationRequest> iterator = workerCreationRequests.iterator();
+ 
++		if (joblessBearer.isEmpty()) {
++			// every new worker needs a free carrier, tell the player if one is missing for a building
++			for (WorkerCreationRequest request : workerCreationRequests) {
++				if (request instanceof WorkerRequest && request.isRequestAlive()) {
++					WorkerRequest workerRequest = (WorkerRequest) request;
++					workerRequest.warnPlayer(SimpleMessage.noFreeBearer(workerRequest.building));
++				}
++			}
++			return;
++		}
++
+ 		while(iterator.hasNext() && !joblessBearer.isEmpty()) {
+ 			WorkerCreationRequest workerCreationRequest = iterator.next();
+ 			if (!workerCreationRequest.isRequestAlive() || tryToCreateWorker(workerCreationRequest)) {
+@@ -337,6 +349,10 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 
+ 			if(offer == null) { // no tool found => cannot create worker
+ 				workerCreationRequest.setToolProductionRequired(true);
++				if (workerCreationRequest instanceof WorkerRequest) {
++					WorkerRequest workerRequest = (WorkerRequest) workerCreationRequest;
++					workerRequest.warnPlayer(SimpleMessage.missingTool(workerRequest.building, tool));
++				}
+ 				return false;
+ 			}
+ 		}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java
+index 7ae61823a..d7e8a6f9c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java
+@@ -15,6 +15,7 @@
+ package jsettlers.logic.map.grid.partition.manager.manageables.interfaces;
+ 
+ import jsettlers.common.buildings.BuildingVariant;
++import jsettlers.common.menu.messages.IMessage;
+ import jsettlers.common.buildings.EBuildingType;
+ import jsettlers.common.buildings.IBuilding;
+ import jsettlers.common.mapobject.EMapObjectType;
+@@ -64,5 +65,10 @@ public interface IWorkerRequestBuilding extends IPlayerable, ILocatable, IBuildi
+ 
+ 	void setCannotWork(boolean cannotWork);
+ 
++	/**
++	 * Shows a message to the owner of this building.
++	 */
++	void showMessage(IMessage message);
++
+ 	void addMapObjectCleanupPosition(ShortPoint2D pos, EMapObjectType objectType);
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/WorkerRequest.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/WorkerRequest.java
+index 3a9b1b99d..d1fd4121a 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/WorkerRequest.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/WorkerRequest.java
+@@ -16,9 +16,11 @@ package jsettlers.logic.map.grid.partition.manager.objects;
+ 
+ import java.io.Serializable;
+ 
++import jsettlers.common.menu.messages.IMessage;
+ import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.position.ILocatable;
+ import jsettlers.common.position.ShortPoint2D;
++import jsettlers.logic.constants.MatchConstants;
+ import jsettlers.logic.map.grid.partition.manager.manageables.interfaces.IWorkerRequestBuilding;
+ 
+ public final class WorkerRequest extends WorkerCreationRequest implements ILocatable, Serializable {
+@@ -28,6 +30,10 @@ public final class WorkerRequest extends WorkerCreationRequest implements ILocat
+ 	public final IWorkerRequestBuilding building;
+ 	public boolean creationRequested = false;
+ 
++	private static final int WARNING_DELAY = 10 * 1000;
++	private static final int WARNING_REPEAT = 120 * 1000;
++	private int nextWarningTime = 0;
++
+ 	public WorkerRequest(EMovableType movableType, IWorkerRequestBuilding building) {
+ 		this.building = building;
+ 		this.movableType = movableType;
+@@ -43,6 +49,24 @@ public final class WorkerRequest extends WorkerCreationRequest implements ILocat
+ 		return movableType + "    " + creationRequested + "     " + building.getBuildingVariant();
+ 	}
+ 
++	/**
++	 * Tells the player that this building waits for its worker for a long time. The message is shown after a delay and then repeated from time to
++	 * time, as long as the request is waiting.
++	 *
++	 * @param message
++	 * 		The message to show.
++	 */
++	public void warnPlayer(IMessage message) {
++		int now = MatchConstants.clock().getTime();
++		if (nextWarningTime == 0) {
++			nextWarningTime = now + WARNING_DELAY;
++		}
++		if (now >= nextWarningTime) {
++			nextWarningTime = now + WARNING_REPEAT;
++			building.showMessage(message);
++		}
++	}
++
+ 	@Override
+ 	public boolean isRequestAlive() {
+ 		return !building.isDestroyed();
 PATCH_EOF
 cat > "$WORK/patches/09-messages-layout-and-settings-file.patch" <<'PATCH_EOF'
 diff --git a/go.graphics/src/main/java/go/graphics/Tweaks.java b/go.graphics/src/main/java/go/graphics/Tweaks.java
@@ -1551,7 +1752,7 @@ index 10cc924..8f25f5b 100644
 PATCH_EOF
 cat > "$WORK/patches/12-language-selection-czech.patch" <<'PATCH_EOF'
 diff --git a/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java b/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java
-index ca34e24..82fc46d 100644
+index ca34e246f..82fc46d6e 100644
 --- a/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java
 +++ b/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java
 @@ -49,6 +49,13 @@ public abstract class AbstractTextDrawer<T extends GLDrawContext> {
@@ -1595,7 +1796,7 @@ index ca34e24..82fc46d 100644
  		setupBitmapDraw();
  
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/AbstractLabels.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/AbstractLabels.java
-index 5186ba7..72cf286 100644
+index 5186ba7f3..72cf286fc 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/AbstractLabels.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/AbstractLabels.java
 @@ -17,6 +17,8 @@ package jsettlers.graphics.localization;
@@ -1648,7 +1849,7 @@ index 5186ba7..72cf286 100644
  
  	/**
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/Labels.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/Labels.java
-index 430954e..f3735f5 100644
+index 430954e5e..f3735f562 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/Labels.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/Labels.java
 @@ -45,6 +45,14 @@ public final class Labels extends AbstractLabels {
@@ -1668,12 +1869,12 @@ index 430954e..f3735f5 100644
  	 * 
 diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
 new file mode 100644
-index 0000000..c7a749f
+index 000000000..85c0b1d5e
 --- /dev/null
 +++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
-@@ -0,0 +1,612 @@
+@@ -0,0 +1,614 @@
 +###############################################################################
-+# Czech translation (cestina) for the JSettlers macOS build.
++# Czech translation (čeština) for the JSettlers macOS build.
 +# Same license as the rest of the project (MIT). File encoding: UTF-8.
 +#
 +# Keep the placeholders (%s, %d, %.0f%% ...) exactly as in labels_en.properties.
@@ -2052,6 +2253,8 @@ index 0000000..c7a749f
 +no_soldier_available_TOWER = Vaši strážní věž nelze obsadit: není k dispozici žádný voják.
 +no_soldier_available_BIG_TOWER = Vaši velkou strážní věž nelze obsadit: není k dispozici žádný voják.
 +no_soldier_available_CASTLE = Váš hrad nelze obsadit: není k dispozici žádný voják.
++message_missing_tool = %s nelze obsadit: chybí nástroj (%s).
++message_no_free_bearer = %s nelze obsadit: není k dispozici žádný volný nosič.
 +action_firerer_slow = Pozor! Hra reaguje pomalu.
 +
 +# progress display
@@ -2285,7 +2488,7 @@ index 0000000..c7a749f
 +flatpak-title=Vyberte složku s originální hrou
 +flatpak-description=JSettlers ke spuštění potřebuje soubory s grafikou a zvukem z instalace Settlers 3.\nPokud kopii nevlastníte, přečtěte si README na naší stránce GitHub.\nChcete-li pokračovat, musíte nyní vybrat složku s takovou instalací.
 diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
-index 9dbf08e..58428f9 100644
+index b9e221d48..38ffeb25d 100644
 --- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
 +++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
 @@ -183,7 +183,7 @@ buildingtypes_social   = Misc. Buildings
@@ -2326,7 +2529,7 @@ index 9dbf08e..58428f9 100644
  cannot_find_work_WINEGROWER = Your winery can't find enough spots for growing vines in its work area.
  cannot_find_work_WATERWORKS = Your waterworks can't find any river in its work area.
  cannot_find_work_FISHER = Your fisher can't find any sea in its work area.
-@@ -400,7 +400,7 @@ movable_LUMBERJACK = Woodcutter
+@@ -402,7 +402,7 @@ movable_LUMBERJACK = Woodcutter
  movable_STONECUTTER = Stonecutter
  movable_SAWMILLER = Sawmiller
  movable_FORESTER = Forester
@@ -2335,7 +2538,7 @@ index 9dbf08e..58428f9 100644
  movable_MINER = Miner
  movable_FISHERMAN = Fisherman
  movable_FARMER = Farmer
-@@ -464,12 +464,17 @@ start-joining-ready = Ready
+@@ -466,12 +466,17 @@ start-joining-ready = Ready
  
  settings-title = Settings
  settings-name = Player Name
@@ -2354,7 +2557,7 @@ index 9dbf08e..58428f9 100644
  settings-back = Back
  settings-ok = OK
  game-menu-pause = Pause
-@@ -506,6 +511,7 @@ multiplayer-server-name = Name
+@@ -508,6 +513,7 @@ multiplayer-server-name = Name
  multiplayer-server-type = Type
  multiplayer-server-address = IP/hostname
  multiplayer-server-url = URL
@@ -2362,7 +2565,7 @@ index 9dbf08e..58428f9 100644
  
  multiplayer-server-cancel = Cancel
  multiplayer-server-delete = Delete
-@@ -564,7 +570,7 @@ stats-panel-name = Name
+@@ -566,7 +572,7 @@ stats-panel-name = Name
  stats-panel-team = Team
  stats-panel-manna = Manna
  stats-panel-gold = Gold
@@ -2372,7 +2575,7 @@ index 9dbf08e..58428f9 100644
  peace-time-WITHOUT = without
  player-type-HUMAN = Human
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/JSettlersFrame.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/JSettlersFrame.java
-index 2702913..b36a96d 100644
+index 270291357..b36a96d55 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/JSettlersFrame.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/JSettlersFrame.java
 @@ -41,6 +41,8 @@ import jsettlers.common.menu.IStartedGame;
@@ -2424,7 +2627,7 @@ index 2702913..b36a96d 100644
  		setNewContentPane(mainPanel);
  	}
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/mainmenu/MainMenuPanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/mainmenu/MainMenuPanel.java
-index 355b8e3..c51c984 100644
+index 355b8e36c..c51c98412 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/mainmenu/MainMenuPanel.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/mainmenu/MainMenuPanel.java
 @@ -76,6 +76,8 @@ public class MainMenuPanel extends SplitedBackgroundPanel {
@@ -2467,7 +2670,7 @@ index 355b8e3..c51c984 100644
  		buttonPanel.setLayout(new GridLayout(0, 1, 20, 20));
  
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/RemoteMapDirectoryPanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/RemoteMapDirectoryPanel.java
-index fbafe18..9f66f14 100644
+index fbafe181f..9f66f1498 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/RemoteMapDirectoryPanel.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/RemoteMapDirectoryPanel.java
 @@ -41,7 +41,8 @@ public class RemoteMapDirectoryPanel extends JPanel {
@@ -2499,7 +2702,7 @@ index fbafe18..9f66f14 100644
  			if(!currentDir.equals("/")) {
  				if (i == 0) return RETURN;
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/EMapFilter.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/EMapFilter.java
-index dd13a91..54e5078 100644
+index dd13a9180..54e507847 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/EMapFilter.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/EMapFilter.java
 @@ -56,18 +56,6 @@ public enum EMapFilter {
@@ -2531,7 +2734,7 @@ index dd13a91..54e5078 100644
  	}
  }
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/SearchTextField.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/SearchTextField.java
-index e74e26a..6535cbb 100644
+index e74e26aa0..6535cbbf3 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/SearchTextField.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/SearchTextField.java
 @@ -36,7 +36,7 @@ public class SearchTextField extends JTextField {
@@ -2553,7 +2756,7 @@ index e74e26a..6535cbb 100644
  	}
  }
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/settingsmenu/SettingsMenuPanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/settingsmenu/SettingsMenuPanel.java
-index 3cd777d..64fcc7a 100644
+index 3cd777d6b..64fcc7ae6 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/settingsmenu/SettingsMenuPanel.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/settingsmenu/SettingsMenuPanel.java
 @@ -19,6 +19,7 @@ import java.awt.GridLayout;
@@ -2623,7 +2826,7 @@ index 3cd777d..64fcc7a 100644
  		volumeMusicSlider.setValue((int) (settingsManager.getMusicVolume() * 100));
  		playAllMusicCheckBox.setSelected(settingsManager.isMusicPlayAll());
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/statspanel/EndgameStatsPanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/statspanel/EndgameStatsPanel.java
-index 1988dd2..298ba12 100644
+index 1988dd255..298ba121c 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/statspanel/EndgameStatsPanel.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/statspanel/EndgameStatsPanel.java
 @@ -51,7 +51,8 @@ public class EndgameStatsPanel extends BackgroundPanel {
@@ -2638,7 +2841,7 @@ index 1988dd2..298ba12 100644
  			Labels.getString("stats-panel-manna"),
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/GameLanguage.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/GameLanguage.java
 new file mode 100644
-index 0000000..1420a49
+index 000000000..1420a49b1
 --- /dev/null
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/GameLanguage.java
 @@ -0,0 +1,65 @@
@@ -2708,7 +2911,7 @@ index 0000000..1420a49
 +	}
 +}
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/SettingsManager.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/SettingsManager.java
-index 1b0f22c..edfaf01 100644
+index 1b0f22cfe..edfaf0158 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/SettingsManager.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/SettingsManager.java
 @@ -298,16 +298,26 @@ public class SettingsManager implements ISoundSettingsProvider {
@@ -3709,7 +3912,3506 @@ index 5d03de4..7047f90 100644
  		@Override
  		public String toString() {
 PATCH_EOF
-PATCH_NAMES="01-lan-multiplayer-broadcast 02-endgame-player-names 03-gifts-of-the-gods-spell 04-soldiers-ignore-far-civilians 05-font-quality-and-size 06-building-cost-tooltip 07-tooltip-position 08-in-game-messages 09-messages-layout-and-settings-file 10-game-speed-and-fps-limit 11-amazon-storage-shadow 12-language-selection-czech 13-thief-fixes 14-zoom-indicator 15-control-groups 16-peacetime"
+cat > "$WORK/patches/17-hd-graphics.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdCacheFile.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdCacheFile.java
+new file mode 100644
+index 000000000..7e31c37f7
+--- /dev/null
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdCacheFile.java
+@@ -0,0 +1,312 @@
++/*******************************************************************************
++ * Copyright (c) 2026
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ *******************************************************************************/
++package jsettlers.graphics.image.hd;
++
++import java.io.ByteArrayOutputStream;
++import java.io.Closeable;
++import java.io.File;
++import java.io.IOException;
++import java.io.RandomAccessFile;
++import java.nio.ByteBuffer;
++import java.nio.ByteOrder;
++import java.nio.IntBuffer;
++import java.util.HashMap;
++import java.util.Map;
++import java.util.zip.DataFormatException;
++import java.util.zip.Deflater;
++import java.util.zip.Inflater;
++
++import go.graphics.ImageData;
++
++/**
++ * A file with the enlarged ("HD") versions of the images of one original graphics file (siedler3_XX.*.dat).
++ * <p>
++ * The images are found by the position and kind of the image in the original file. The file is created on the computer of the user from the original
++ * graphics (see {@link HdGenerator}); the enlarged images are never distributed.
++ * <p>
++ * Layout: header (magic, version, scale, size of the original file, engine name, number of images, position of the index), the compressed
++ * images, the index (position in the original file, width, height, position and length of the data).
++ */
++public final class HdCacheFile implements Closeable {
++	private static final int MAGIC = 0x4A534844; // "JSHD"
++	private static final int VERSION = 3;
++
++	/** Kinds of images, they are part of the key of an image. */
++	public static final int KIND_SETTLER = 0;
++	public static final int KIND_TORSO = 1;
++	public static final int KIND_SHADOW = 2;
++	/** A terrain texture (a repeating tile). */
++	public static final int KIND_LANDSCAPE = 3;
++	/** An icon, button or other image of the user interface. */
++	public static final int KIND_GUI = 4;
++
++	/**
++	 * The key of an image: its position in the original graphics file and its kind.
++	 */
++	public static long key(long position, int kind) {
++		return (position << 3) | kind;
++	}
++
++	public static long positionOf(long key) {
++		return key >>> 3;
++	}
++
++	public static int kindOf(long key) {
++		return (int) (key & 7);
++	}
++
++	private static final class Entry {
++		final int width;
++		final int height;
++		final long offset;
++		final int length;
++
++		Entry(int width, int height, long offset, int length) {
++			this.width = width;
++			this.height = height;
++			this.offset = offset;
++			this.length = length;
++		}
++	}
++
++	private final RandomAccessFile file;
++	private final Map<Long, Entry> index;
++	private final int scale;
++	private final String engine;
++
++	private HdCacheFile(RandomAccessFile file, Map<Long, Entry> index, int scale, String engine) {
++		this.file = file;
++		this.index = index;
++		this.scale = scale;
++		this.engine = engine;
++	}
++
++	/**
++	 * Opens a cache file.
++	 *
++	 * @param sourceSize
++	 *            The size of the original graphics file. The cache is only used if it was created from a file of the same size.
++	 * @param engine
++	 *            The engine the cache has to be made with, null if any engine is fine.
++	 * @return The cache or null, if it does not exist or does not fit.
++	 */
++	public static HdCacheFile open(File cacheFile, long sourceSize, String engine) {
++		if (!cacheFile.isFile()) {
++			return null;
++		}
++		RandomAccessFile raf = null;
++		try {
++			raf = new RandomAccessFile(cacheFile, "r");
++			if (raf.readInt() != MAGIC || raf.readInt() != VERSION) {
++				raf.close();
++				return null;
++			}
++			int scale = raf.readInt();
++			long size = raf.readLong();
++			String cacheEngine = raf.readUTF();
++			int count = raf.readInt();
++			long indexPosition = raf.readLong();
++			if (size != sourceSize || scale != HdGraphics.SCALE || indexPosition <= 0 || (engine != null && !engine.equals(cacheEngine))) {
++				raf.close();
++				return null;
++			}
++
++			raf.seek(indexPosition);
++			Map<Long, Entry> index = new HashMap<>(count * 2);
++			for (int i = 0; i < count; i++) {
++				long key = raf.readLong();
++				int width = raf.readInt();
++				int height = raf.readInt();
++				long offset = raf.readLong();
++				int length = raf.readInt();
++				index.put(key, new Entry(width, height, offset, length));
++			}
++			return new HdCacheFile(raf, index, scale, cacheEngine);
++		} catch (IOException e) {
++			HdGraphics.log("the file " + cacheFile + " can not be read: " + e);
++			if (raf != null) {
++				try {
++					raf.close();
++				} catch (IOException ex) { /* nothing to do */ }
++			}
++			return null;
++		}
++	}
++
++	public String getEngine() {
++		return engine;
++	}
++
++	public int getImageCount() {
++		return index.size();
++	}
++
++	/**
++	 * Gets the enlarged image.
++	 *
++	 * @param key
++	 *            The key of the image, see {@link #key(long, int)}.
++	 * @return The image or null if there is none.
++	 */
++	public ImageData get(long key) {
++		Entry entry = index.get(key);
++		if (entry == null) {
++			return null;
++		}
++
++		byte[] compressed = new byte[entry.length];
++		synchronized (this) {
++			try {
++				file.seek(entry.offset);
++				file.readFully(compressed);
++			} catch (IOException e) {
++				HdGraphics.log("reading an image failed: " + e);
++				return null;
++			}
++		}
++
++		byte[] raw = new byte[entry.width * entry.height * 4];
++		Inflater inflater = new Inflater();
++		try {
++			inflater.setInput(compressed);
++			int done = 0;
++			while (done < raw.length && !inflater.finished()) {
++				int read = inflater.inflate(raw, done, raw.length - done);
++				if (read == 0 && (inflater.needsInput() || inflater.needsDictionary())) {
++					break;
++				}
++				done += read;
++			}
++			if (done != raw.length) {
++				return null;
++			}
++		} catch (DataFormatException e) {
++			return null;
++		} finally {
++			inflater.end();
++		}
++
++		IntBuffer buffer = ByteBuffer.allocateDirect(raw.length).order(ByteOrder.nativeOrder()).asIntBuffer();
++		ByteBuffer bytes = ByteBuffer.wrap(raw).order(ByteOrder.BIG_ENDIAN);
++		for (int i = 0; i < entry.width * entry.height; i++) {
++			buffer.put(i, bytes.getInt());
++		}
++		buffer.rewind();
++		return ImageData.of(buffer, entry.width, entry.height);
++	}
++
++	@Override
++	public void close() throws IOException {
++		file.close();
++	}
++
++	/**
++	 * Creates a cache file.
++	 */
++	public static final class Writer implements Closeable {
++		private final File target;
++		private final File temp;
++		private final RandomAccessFile file;
++		private final String engine;
++		private final long sourceSize;
++		private final Map<Long, Entry> entries = new HashMap<>();
++		private final Deflater deflater = new Deflater(Deflater.BEST_SPEED);
++
++		public Writer(File target, long sourceSize, String engine) throws IOException {
++			this.target = target;
++			this.temp = new File(target.getPath() + ".tmp");
++			this.sourceSize = sourceSize;
++			this.engine = engine;
++			File parent = target.getAbsoluteFile().getParentFile();
++			if (parent != null) {
++				parent.mkdirs();
++			}
++			this.file = new RandomAccessFile(temp, "rw");
++			this.file.setLength(0);
++			writeHeader(0);
++		}
++
++		private void writeHeader(long indexPosition) throws IOException {
++			file.seek(0);
++			file.writeInt(MAGIC);
++			file.writeInt(VERSION);
++			file.writeInt(HdGraphics.SCALE);
++			file.writeLong(sourceSize);
++			file.writeUTF(engine);
++			file.writeInt(entries.size());
++			file.writeLong(indexPosition);
++		}
++
++		/**
++		 * @param pixels
++		 *            The pixels in the format of {@link ImageData} (red, green, blue, alpha).
++		 */
++		public void add(long key, int width, int height, int[] pixels) throws IOException {
++			ByteBuffer bytes = ByteBuffer.allocate(width * height * 4).order(ByteOrder.BIG_ENDIAN);
++			bytes.asIntBuffer().put(pixels, 0, width * height);
++
++			deflater.reset();
++			deflater.setInput(bytes.array());
++			deflater.finish();
++			ByteArrayOutputStream out = new ByteArrayOutputStream(bytes.capacity() / 2 + 64);
++			byte[] chunk = new byte[16384];
++			while (!deflater.finished()) {
++				int length = deflater.deflate(chunk);
++				out.write(chunk, 0, length);
++			}
++
++			long offset = file.length();
++			file.seek(offset);
++			file.write(out.toByteArray());
++			entries.put(key, new Entry(width, height, offset, out.size()));
++		}
++
++		@Override
++		public void close() throws IOException {
++			try {
++				long indexPosition = file.length();
++				file.seek(indexPosition);
++				for (Map.Entry<Long, Entry> e : entries.entrySet()) {
++					file.writeLong(e.getKey());
++					file.writeInt(e.getValue().width);
++					file.writeInt(e.getValue().height);
++					file.writeLong(e.getValue().offset);
++					file.writeInt(e.getValue().length);
++				}
++				writeHeader(indexPosition);
++			} finally {
++				file.close();
++				deflater.end();
++			}
++			if (target.exists() && !target.delete()) {
++				throw new IOException("Can not replace " + target);
++			}
++			if (!temp.renameTo(target)) {
++				throw new IOException("Can not rename " + temp + " to " + target);
++			}
++		}
++
++		/**
++		 * Gives up (e.g. after an error): removes the unfinished file.
++		 */
++		public void abort() {
++			try {
++				file.close();
++			} catch (IOException e) { /* nothing to do */ }
++			deflater.end();
++			temp.delete();
++		}
++	}
++}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdEngine.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdEngine.java
+new file mode 100644
+index 000000000..77d691632
+--- /dev/null
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdEngine.java
+@@ -0,0 +1,169 @@
++/*******************************************************************************
++ * Copyright (c) 2026
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ *******************************************************************************/
++package jsettlers.graphics.image.hd;
++
++import java.io.File;
++import java.io.IOException;
++import java.nio.file.Files;
++import java.nio.file.Path;
++import java.nio.file.StandardCopyOption;
++import java.util.concurrent.TimeUnit;
++import java.util.function.IntConsumer;
++import java.util.stream.Stream;
++
++/**
++ * The optional AI engine of the HD graphics: the command line program "realesrgan-ncnn-vulkan" (Real-ESRGAN, MIT licence). It is not part of the
++ * game. If it is installed (the build script of the macOS version downloads it, or the folder is given with the system property
++ * "settlers.hd.engine"), it makes the colours of the enlarged images, otherwise the built-in enlarger is used.
++ */
++final class HdEngine {
++	static final String EXECUTABLE = "realesrgan-ncnn-vulkan";
++	static final String MODEL = "realesr-animevideov3";
++	private static final String FAILED_MARKER = "engine-failed.txt";
++
++	private HdEngine() {
++	}
++
++	static File getSourceDir() {
++		String path = System.getProperty("settlers.hd.engine");
++		if (path == null || path.isEmpty()) {
++			return null;
++		}
++		File dir = new File(path);
++		return new File(dir, EXECUTABLE).isFile() && new File(dir, "models").isDirectory() ? dir : null;
++	}
++
++	/**
++	 * @return true if an engine is installed and did not fail before.
++	 */
++	static boolean isAvailable(File cacheDir) {
++		return getSourceDir() != null && !new File(cacheDir, FAILED_MARKER).exists();
++	}
++
++	static void markFailed(File cacheDir, String reason) {
++		try {
++			cacheDir.mkdirs();
++			Files.write(new File(cacheDir, FAILED_MARKER).toPath(),
++					("The AI engine did not work, so the built-in enlarger is used.\nDelete this file to try the engine again.\n" + reason + "\n")
++							.getBytes("UTF-8"));
++		} catch (IOException e) {
++			HdGraphics.log(String.valueOf(e));
++		}
++	}
++
++	/**
++	 * Copies the engine to the cache folder (so it can be started and signed there) and returns the program.
++	 */
++	static File install(File cacheDir) throws IOException {
++		File source = getSourceDir();
++		if (source == null) {
++			throw new IOException("There is no engine.");
++		}
++		File target = new File(cacheDir, "engine");
++		File exe = new File(target, EXECUTABLE);
++		File stamp = new File(target, ".source-size");
++		String sourceStamp = String.valueOf(new File(source, EXECUTABLE).length());
++		if (!exe.isFile() || !stamp.isFile() || !new String(Files.readAllBytes(stamp.toPath()), "UTF-8").equals(sourceStamp)) {
++			deleteRecursively(target);
++			copyRecursively(source.toPath(), target.toPath());
++			exe.setExecutable(true, false);
++			Files.write(stamp.toPath(), sourceStamp.getBytes("UTF-8"));
++			if (System.getProperty("os.name", "").toLowerCase().contains("mac")) {
++				runQuietly("xattr", "-cr", target.getAbsolutePath());
++				runQuietly("codesign", "--force", "--sign", "-", exe.getAbsolutePath());
++			}
++		}
++		return exe;
++	}
++
++	private static void runQuietly(String... command) {
++		try {
++			Process p = new ProcessBuilder(command).redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
++			p.waitFor(60, TimeUnit.SECONDS);
++		} catch (Exception e) {
++			// best effort
++		}
++	}
++
++	private static void copyRecursively(Path from, Path to) throws IOException {
++		try (Stream<Path> stream = Files.walk(from)) {
++			for (Path p : (Iterable<Path>) stream::iterator) {
++				Path dest = to.resolve(from.relativize(p).toString());
++				if (Files.isDirectory(p)) {
++					Files.createDirectories(dest);
++				} else {
++					Files.createDirectories(dest.getParent());
++					Files.copy(p, dest, StandardCopyOption.REPLACE_EXISTING);
++				}
++			}
++		}
++	}
++
++	static void deleteRecursively(File file) {
++		if (file == null || !file.exists()) {
++			return;
++		}
++		File[] children = file.listFiles();
++		if (children != null) {
++			for (File child : children) {
++				deleteRecursively(child);
++			}
++		}
++		file.delete();
++	}
++
++	/**
++	 * Enlarges all png images of a folder two times.
++	 *
++	 * @param progress
++	 *            Gets the number of images that are done.
++	 * @return true if the engine finished without an error.
++	 */
++	static boolean run(File exe, File inputDir, File outputDir, int expected, File log, IntConsumer progress) {
++		outputDir.mkdirs();
++		try {
++			Process process = new ProcessBuilder(exe.getAbsolutePath(),
++					"-i", inputDir.getAbsolutePath(),
++					"-o", outputDir.getAbsolutePath(),
++					"-n", MODEL,
++					"-s", "2",
++					"-f", "png",
++					"-m", new File(exe.getParentFile(), "models").getAbsolutePath())
++							.directory(exe.getParentFile())
++							.redirectErrorStream(true)
++							.redirectOutput(ProcessBuilder.Redirect.appendTo(log))
++							.start();
++
++			long deadline = System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(45);
++			while (!process.waitFor(400, TimeUnit.MILLISECONDS)) {
++				String[] done = outputDir.list();
++				progress.accept(done == null ? 0 : done.length);
++				if (System.currentTimeMillis() > deadline) {
++					process.destroyForcibly();
++					return false;
++				}
++			}
++			String[] done = outputDir.list();
++			progress.accept(done == null ? 0 : done.length);
++			return process.exitValue() == 0 && done != null && done.length >= expected * 0.95;
++		} catch (IOException e) {
++			HdGraphics.log("the engine could not be started: " + e);
++			return false;
++		} catch (InterruptedException e) {
++			Thread.currentThread().interrupt();
++			return false;
++		}
++	}
++}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdGenerator.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdGenerator.java
+new file mode 100644
+index 000000000..3f76cbfcd
+--- /dev/null
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdGenerator.java
+@@ -0,0 +1,262 @@
++/*******************************************************************************
++ * Copyright (c) 2026
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ *******************************************************************************/
++package jsettlers.graphics.image.hd;
++
++import java.awt.image.BufferedImage;
++import java.io.File;
++import java.io.IOException;
++import java.nio.IntBuffer;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.TreeSet;
++
++import javax.imageio.ImageIO;
++
++import jsettlers.graphics.image.Image;
++import jsettlers.graphics.image.reader.AdvancedDatFileReader;
++import jsettlers.graphics.image.reader.ImageMetadata;
++import jsettlers.graphics.image.reader.IntArrayWriter;
++import jsettlers.graphics.image.reader.translator.DatBitmapTranslator;
++
++/**
++ * Creates the cache file with the enlarged images of one graphics file.
++ */
++final class HdGenerator {
++	private static final int CHUNK = 800;
++
++	/** Larger images are not enlarged (the enlarged image has to fit into a texture of the graphics card). */
++	private static final int MAX_SIZE = 900;
++
++	/** Thrown if the AI engine does not work. */
++	static final class EngineFailure extends Exception {
++		private static final long serialVersionUID = 1L;
++
++		EngineFailure(String message) {
++			super(message);
++		}
++	}
++
++	private final AdvancedDatFileReader reader;
++	private final File cacheFile;
++	private final File sourceFile;
++	private final HdGraphics.Progress progress;
++	private final java.util.Set<Long> spritesWithTorso = new java.util.HashSet<>();
++
++	HdGenerator(AdvancedDatFileReader reader, File cacheFile, HdGraphics.Progress progress) {
++		this.reader = reader;
++		this.sourceFile = reader.getFile();
++		this.cacheFile = cacheFile;
++		this.progress = progress;
++	}
++
++	/**
++	 * Counts the images that have to be enlarged.
++	 */
++	int countImages() {
++		TreeSet<Long> keys = new TreeSet<>();
++		reader.collectSettlerImagePositions(keys, spritesWithTorso);
++		int[] counts = new int[8];
++		for (long key : keys) {
++			counts[HdCacheFile.kindOf(key)]++;
++		}
++		HdGraphics.log(sourceFile.getName() + ": " + counts[HdCacheFile.KIND_SETTLER] + " pictures ("
++				+ spritesWithTorso.size() + " with team colour), " + counts[HdCacheFile.KIND_TORSO] + " team colour masks, "
++				+ counts[HdCacheFile.KIND_SHADOW] + " shadows, " + counts[HdCacheFile.KIND_LANDSCAPE] + " terrain textures, "
++				+ counts[HdCacheFile.KIND_GUI] + " interface images");
++		return keys.size();
++	}
++
++	private static final class RawImage {
++		final long key;
++		final int width;
++		final int height;
++		final int[] pixels;
++		/** The outline has to stay exactly as it is (sprites that are drawn with a torso). */
++		boolean exactOutline;
++
++		RawImage(long key, int width, int height, int[] pixels) {
++			this.key = key;
++			this.width = width;
++			this.height = height;
++			this.pixels = pixels;
++		}
++	}
++
++	private RawImage read(long key) throws IOException {
++		DatBitmapTranslator<? extends Image> translator;
++		switch (HdCacheFile.kindOf(key)) {
++		case HdCacheFile.KIND_TORSO:
++			translator = reader.getTorsoTranslator();
++			break;
++		case HdCacheFile.KIND_SHADOW:
++			translator = reader.getShadowTranslator();
++			break;
++		case HdCacheFile.KIND_LANDSCAPE:
++			translator = reader.getLandscapeTranslator();
++			break;
++		case HdCacheFile.KIND_GUI:
++			translator = reader.getGuiTranslator();
++			break;
++		default:
++			translator = reader.getSettlerTranslator();
++			break;
++		}
++		return read(translator, key);
++	}
++
++	private <T extends Image> RawImage read(DatBitmapTranslator<T> translator, long key) throws IOException {
++		long position = HdCacheFile.positionOf(key);
++		ImageMetadata metadata = new ImageMetadata();
++		long dataPos = reader.readImageHeader(translator, metadata, position);
++		if (metadata.width <= 0 || metadata.height <= 0 || metadata.width > MAX_SIZE || metadata.height > MAX_SIZE) {
++			return null;
++		}
++		IntArrayWriter array = new IntArrayWriter();
++		reader.readCompressedData(translator, metadata, array, dataPos);
++		IntBuffer buffer = array.getArray().duplicate();
++		buffer.rewind();
++		int[] pixels = new int[metadata.width * metadata.height];
++		buffer.get(pixels, 0, Math.min(pixels.length, buffer.remaining()));
++		RawImage image = new RawImage(key, metadata.width, metadata.height, pixels);
++		image.exactOutline = spritesWithTorso.contains(key);
++		return image;
++	}
++
++	/**
++	 * Creates the file.
++	 *
++	 * @param engineName
++	 *            The name written to the file.
++	 * @param engineExe
++	 *            The AI engine, or null for the built-in enlarger.
++	 * @param workDir
++	 *            A folder for the temporary files of the engine.
++	 */
++	void generate(String engineName, File engineExe, File workDir, File cacheDir) throws IOException, EngineFailure {
++		TreeSet<Long> keySet = new TreeSet<>();
++		reader.collectSettlerImagePositions(keySet, spritesWithTorso);
++		List<Long> keys = new ArrayList<>(keySet);
++
++		HdCacheFile.Writer writer = new HdCacheFile.Writer(cacheFile, sourceFile.length(), engineName);
++		boolean ok = false;
++		try {
++			for (int from = 0; from < keys.size(); from += CHUNK) {
++				List<Long> chunk = keys.subList(from, Math.min(keys.size(), from + CHUNK));
++				List<RawImage> colorImages = new ArrayList<>();
++
++				for (long key : chunk) {
++					RawImage image = read(key);
++					if (image == null) {
++						progress.imageDone();
++						continue;
++					}
++					int imageKind = HdCacheFile.kindOf(key);
++					boolean colors = imageKind == HdCacheFile.KIND_SETTLER || imageKind == HdCacheFile.KIND_GUI || imageKind == HdCacheFile.KIND_LANDSCAPE;
++					if (engineExe != null && colors) {
++						colorImages.add(image);
++					} else {
++						writer.add(key, image.width * 2, image.height * 2, upscaleBuiltIn(image));
++						progress.imageDone();
++					}
++				}
++
++				if (!colorImages.isEmpty()) {
++					enlargeWithEngine(colorImages, writer, engineExe, workDir, cacheDir);
++				}
++			}
++			ok = true;
++		} finally {
++			if (ok) {
++				writer.close();
++			} else {
++				writer.abort();
++			}
++		}
++	}
++
++	private static boolean isTile(RawImage image) {
++		return HdCacheFile.kindOf(image.key) == HdCacheFile.KIND_LANDSCAPE;
++	}
++
++	private static int[] upscaleBuiltIn(RawImage image) {
++		int kind = HdCacheFile.kindOf(image.key);
++		if (kind == HdCacheFile.KIND_LANDSCAPE) {
++			return HdUpscaler.upscaleTile(image.pixels, image.width, image.height);
++		}
++		if (kind == HdCacheFile.KIND_TORSO) {
++			return HdUpscaler.upscale(image.pixels, image.width, image.height, HdUpscaler.Kind.TORSO);
++		}
++		if (kind == HdCacheFile.KIND_SHADOW) {
++			return HdUpscaler.upscale(image.pixels, image.width, image.height, HdUpscaler.Kind.MASK);
++		}
++		return HdUpscaler.upscale(image.pixels, image.width, image.height,
++				image.exactOutline ? HdUpscaler.Kind.COLOR_EXACT_OUTLINE : HdUpscaler.Kind.COLOR);
++	}
++
++	private void enlargeWithEngine(List<RawImage> images, HdCacheFile.Writer writer, File exe, File workDir, File cacheDir)
++			throws IOException, EngineFailure {
++		File in = new File(workDir, "in");
++		File out = new File(workDir, "out");
++		HdEngine.deleteRecursively(workDir);
++		in.mkdirs();
++		out.mkdirs();
++
++		for (int i = 0; i < images.size(); i++) {
++			RawImage image = images.get(i);
++			BufferedImage input = isTile(image) ? HdUpscaler.paddedTile(image.pixels, image.width, image.height)
++					: HdUpscaler.dilatedRgb(image.pixels, image.width, image.height);
++			ImageIO.write(input, "png", new File(in, String.format("%05d.png", i)));
++		}
++
++		int[] counted = {0};
++		boolean engineOk = HdEngine.run(exe, in, out, images.size(), new File(cacheDir, "engine.log"), done -> {
++			while (counted[0] < done) {
++				counted[0]++;
++				progress.imageDone();
++			}
++		});
++		if (!engineOk) {
++			HdEngine.deleteRecursively(workDir);
++			throw new EngineFailure("The engine did not finish (see engine.log).");
++		}
++
++		for (int i = 0; i < images.size(); i++) {
++			RawImage image = images.get(i);
++			int[] result = null;
++			File file = new File(out, String.format("%05d.png", i));
++			if (file.isFile()) {
++				BufferedImage enlarged = ImageIO.read(file);
++				boolean tile = isTile(image);
++				int expectedWidth = tile ? 2 * (image.width + 2 * HdUpscaler.TILE_PAD) : image.width * 2;
++				int expectedHeight = tile ? 2 * (image.height + 2 * HdUpscaler.TILE_PAD) : image.height * 2;
++				if (enlarged != null && enlarged.getWidth() == expectedWidth && enlarged.getHeight() == expectedHeight) {
++					int[] rgb = enlarged.getRGB(0, 0, enlarged.getWidth(), enlarged.getHeight(), null, 0, enlarged.getWidth());
++					result = tile ? HdUpscaler.composeTile(image.pixels, image.width, image.height, rgb)
++							: HdUpscaler.compose(image.pixels, image.width, image.height, rgb, image.exactOutline);
++				}
++			}
++			if (result == null) {
++				result = upscaleBuiltIn(image);
++			}
++			writer.add(image.key, image.width * 2, image.height * 2, result);
++		}
++		// the images that the engine did not report are still counted as done
++		while (counted[0] < images.size()) {
++			counted[0]++;
++			progress.imageDone();
++		}
++		HdEngine.deleteRecursively(workDir);
++	}
++}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdGraphics.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdGraphics.java
+new file mode 100644
+index 000000000..815de8bd8
+--- /dev/null
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdGraphics.java
+@@ -0,0 +1,263 @@
++/*******************************************************************************
++ * Copyright (c) 2026
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ *******************************************************************************/
++package jsettlers.graphics.image.hd;
++
++import java.io.File;
++import java.io.IOException;
++import java.util.ArrayList;
++import java.util.List;
++import java.util.Locale;
++
++import jsettlers.graphics.image.reader.AdvancedDatFileReader;
++import jsettlers.graphics.image.reader.DatFileType;
++import jsettlers.graphics.image.reader.shadowmap.ShadowMapping;
++import jsettlers.graphics.image.reader.versions.DefaultGfxFolderMapping.DefaultDatFileMapping;
++
++/**
++ * The HD graphics: the images of the units, buildings and objects of the original game are enlarged two times on the computer of the user (with the
++ * built-in enlarger or, if it is installed, with an AI engine). The result is stored in a cache folder (on macOS in "Application Support") and is
++ * used instead of the original images. The enlarged images are only made for the user from his own copy of the game and are never distributed.
++ */
++public final class HdGraphics {
++	/** The images are enlarged by this factor. */
++	public static final int SCALE = 2;
++
++	private static final String BUILTIN_ENGINE = "builtin-lanczos3-x2-v2";
++	private static final String AI_ENGINE = "realesrgan-animevideov3-x2-v2";
++
++	private static volatile boolean enabled = false;
++
++	private HdGraphics() {
++	}
++
++	/** Reports the progress of {@link #prepare}. */
++	public interface Progress {
++		/** One image is finished. */
++		void imageDone();
++	}
++
++	/** Receives the state of {@link #prepare}. */
++	public interface Listener {
++		/**
++		 * @param text
++		 *            What is happening.
++		 * @param done
++		 *            Finished images.
++		 * @param total
++		 *            All images that have to be enlarged.
++		 */
++		void update(String text, int done, int total);
++	}
++
++	/**
++	 * Writes a line to the console and to the file "hd.log" in the cache folder.
++	 */
++	public static synchronized void log(String message) {
++		System.out.println("HD graphics: " + message);
++		try {
++			File dir = getCacheDir();
++			dir.mkdirs();
++			java.nio.file.Files.write(new File(dir, "hd.log").toPath(),
++					(new java.util.Date() + "  " + message + "\n").getBytes("UTF-8"),
++					java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.APPEND);
++		} catch (IOException | RuntimeException e) {
++			// the log is only a help
++		}
++	}
++
++	public static boolean isEnabled() {
++		return enabled;
++	}
++
++	public static void setEnabled(boolean enabled) {
++		HdGraphics.enabled = enabled;
++	}
++
++	/**
++	 * The folder with the enlarged images.
++	 */
++	public static File getCacheDir() {
++		String path = System.getProperty("settlers.hd.dir");
++		if (path != null && !path.isEmpty()) {
++			return new File(path);
++		}
++		String home = System.getProperty("user.home", ".");
++		if (System.getProperty("os.name", "").toLowerCase(Locale.ENGLISH).contains("mac")) {
++			return new File(home, "Library/Application Support/JSettlers/hd");
++		}
++		return new File(home, ".jsettlers/hd");
++	}
++
++	private static File cacheFileFor(File dat) {
++		return new File(getCacheDir(), dat.getName().toLowerCase(Locale.ENGLISH) + ".x" + SCALE + ".hd");
++	}
++
++	private static String desiredEngineName() {
++		return HdEngine.isAvailable(getCacheDir()) ? AI_ENGINE : BUILTIN_ENGINE;
++	}
++
++	/**
++	 * Opens the enlarged images for a graphics file.
++	 *
++	 * @return The images or null if there are none (they are then not used).
++	 */
++	public static HdCacheFile openCache(File dat) {
++		if (!enabled) {
++			return null;
++		}
++		// a cache of the other engine is fine here, it is replaced by prepare() when it is started
++		HdCacheFile cache = HdCacheFile.open(cacheFileFor(dat), dat.length(), null);
++		log(dat.getName() + ": " + (cache == null ? "no enlarged images, the original ones are used" : cache.getImageCount() + " enlarged images (" + cache.getEngine() + ")"));
++		return cache;
++	}
++
++	private static List<File> findGraphicsFiles(File gfxFolder) {
++		List<File> result = new ArrayList<>();
++		File[] files = gfxFolder.listFiles();
++		if (files == null) {
++			return result;
++		}
++		for (File file : files) {
++			String name = file.getName().toLowerCase(Locale.ENGLISH);
++			if (!file.isFile() || !name.startsWith("siedler3_")) {
++				continue;
++			}
++			for (DatFileType type : DatFileType.values()) {
++				if (name.endsWith(type.getFileSuffix())) {
++					result.add(file);
++					break;
++				}
++			}
++		}
++		result.sort((a, b) -> a.getName().compareToIgnoreCase(b.getName()));
++		return result;
++	}
++
++	private static AdvancedDatFileReader createReader(File file) {
++		String name = file.getName().toLowerCase(Locale.ENGLISH);
++		int index = -1;
++		try {
++			index = Integer.parseInt(name.substring("siedler3_".length(), "siedler3_".length() + 2));
++		} catch (RuntimeException e) {
++			// no number: no special shadow handling
++		}
++		return new AdvancedDatFileReader(file, DatFileType.getForPath(file), new DefaultDatFileMapping(), ShadowMapping.getMappingFor(index),
++				"F" + index);
++	}
++
++	/**
++	 * Creates the missing enlarged images. Takes some minutes the first time and nothing when everything exists.
++	 *
++	 * @param gfxFolder
++	 *            The folder with the original graphics.
++	 * @param listener
++	 *            Gets the progress, may be null.
++	 */
++	public static void prepare(File gfxFolder, Listener listener) {
++		File cacheDir = getCacheDir();
++		String wantedEngine = desiredEngineName();
++		log("preparing, engine: " + wantedEngine + ", folder: " + gfxFolder);
++
++		List<File> todo = new ArrayList<>();
++		List<AdvancedDatFileReader> readers = new ArrayList<>();
++		int total = 0;
++		for (File dat : findGraphicsFiles(gfxFolder)) {
++			if (HdCacheFile.open(cacheFileFor(dat), dat.length(), wantedEngine) != null) {
++				continue;
++			}
++			try {
++				AdvancedDatFileReader reader = createReader(dat);
++				int count = new HdGenerator(reader, cacheFileFor(dat), () -> { }).countImages();
++				if (count > 0) {
++					todo.add(dat);
++					readers.add(reader);
++					total += count;
++				} else {
++					// nothing to enlarge in this file: remember that, so it is not examined again at every start
++					try (HdCacheFile.Writer writer = new HdCacheFile.Writer(cacheFileFor(dat), dat.length(), wantedEngine)) {
++						// an empty file
++					} catch (IOException e) {
++						log(dat.getName() + ": " + e);
++					}
++				}
++			} catch (RuntimeException e) {
++				log(dat.getName() + " can not be read: " + e);
++			}
++		}
++		if (todo.isEmpty()) {
++			return;
++		}
++
++		final int totalImages = total;
++		final int[] done = {0};
++		final String[] text = {""};
++		final long[] lastReport = {0};
++		Progress progress = () -> {
++			done[0]++;
++			long now = System.currentTimeMillis();
++			if (listener != null && now - lastReport[0] > 150) {
++				lastReport[0] = now;
++				listener.update(text[0], Math.min(done[0], totalImages), totalImages);
++			}
++		};
++
++		File engineExe = null;
++		if (wantedEngine.equals(AI_ENGINE)) {
++			try {
++				engineExe = HdEngine.install(cacheDir);
++			} catch (IOException e) {
++				log("the AI engine can not be installed: " + e);
++				HdEngine.markFailed(cacheDir, e.toString());
++				wantedEngine = BUILTIN_ENGINE;
++			}
++		}
++
++		for (int i = 0; i < todo.size(); i++) {
++			File dat = todo.get(i);
++			text[0] = dat.getName();
++			if (listener != null) {
++				listener.update(text[0], Math.min(done[0], totalImages), totalImages);
++			}
++			int before = done[0];
++			try {
++				new HdGenerator(readers.get(i), cacheFileFor(dat), progress).generate(wantedEngine,
++						wantedEngine.equals(AI_ENGINE) ? engineExe : null, new File(cacheDir, "work"), cacheDir);
++			} catch (HdGenerator.EngineFailure e) {
++				log(e.getMessage() + " The built-in enlarger is used.");
++				HdEngine.markFailed(cacheDir, e.getMessage());
++				wantedEngine = BUILTIN_ENGINE;
++				engineExe = null;
++				done[0] = before;
++				try {
++					new HdGenerator(readers.get(i), cacheFileFor(dat), progress).generate(wantedEngine, null, new File(cacheDir, "work"), cacheDir);
++				} catch (IOException | HdGenerator.EngineFailure ex) {
++					log(dat.getName() + " failed: " + ex);
++				}
++			} catch (IOException e) {
++				log(dat.getName() + " failed: " + e);
++			}
++		}
++		if (listener != null) {
++			listener.update("", totalImages, totalImages);
++		}
++	}
++
++	/**
++	 * Gets the mapping that is used for the shadows (public for tools).
++	 */
++	static ShadowMapping shadowMappingFor(int fileIndex) {
++		return ShadowMapping.getMappingFor(fileIndex);
++	}
++}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdUpscaler.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdUpscaler.java
+new file mode 100644
+index 000000000..45dce546e
+--- /dev/null
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdUpscaler.java
+@@ -0,0 +1,413 @@
++/*******************************************************************************
++ * Copyright (c) 2026
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ *******************************************************************************/
++package jsettlers.graphics.image.hd;
++
++import java.awt.image.BufferedImage;
++
++/**
++ * The built-in enlarger of the HD graphics. It enlarges the images two times without any additional software.
++ * <p>
++ * Pictures: Lanczos resampling of the colors (the colors of the sprite are first spread into the transparent area, so the edge of a sprite does
++ * not get a dark or light halo), a smooth, anti-aliased edge by enlarging the transparency separately.<br>
++ * Masks (team colour, shadow): smooth cubic interpolation of every channel.
++ * <p>
++ * The pixels are in the format of {@link go.graphics.ImageData}: 0xRRGGBBAA, a pixel that is 0 is transparent.
++ */
++public final class HdUpscaler {
++	private HdUpscaler() {
++	}
++
++	public enum Kind {
++		/** A picture with colours (a unit, a building, ...). */
++		COLOR,
++		/** The shadow images. */
++		MASK,
++		/** A picture that is drawn together with a torso: the outline stays exactly as in the original (no soft edge), see SettlerImage. */
++		COLOR_EXACT_OUTLINE,
++		/** The torso (team colour) images: the covered area stays exactly as in the original, only the intensity is smoothed. */
++		TORSO
++	}
++
++	private interface Kernel {
++		float radius();
++
++		float weight(float d);
++	}
++
++	private static final Kernel LANCZOS3 = new Kernel() {
++		@Override
++		public float radius() {
++			return 3;
++		}
++
++		@Override
++		public float weight(float d) {
++			d = Math.abs(d);
++			if (d < 1e-6f) {
++				return 1;
++			}
++			if (d >= 3) {
++				return 0;
++			}
++			double pd = Math.PI * d;
++			return (float) (3 * Math.sin(pd) * Math.sin(pd / 3) / (pd * pd));
++		}
++	};
++
++	private static final Kernel CATMULL_ROM = new Kernel() {
++		@Override
++		public float radius() {
++			return 2;
++		}
++
++		@Override
++		public float weight(float d) {
++			d = Math.abs(d);
++			if (d < 1) {
++				return 1.5f * d * d * d - 2.5f * d * d + 1;
++			} else if (d < 2) {
++				return -0.5f * d * d * d + 2.5f * d * d - 4 * d + 2;
++			}
++			return 0;
++		}
++	};
++
++	/**
++	 * Enlarges one channel (values 0..255) two times, horizontally and vertically.
++	 */
++	private static float[] resample2x(float[] src, int w, int h, Kernel kernel) {
++		return resample2x(src, w, h, kernel, false);
++	}
++
++	/**
++	 * @param wrap
++	 *            true: the image is a repeating tile, the pixels beyond the border are the pixels of the other side.
++	 */
++	private static float[] resample2x(float[] src, int w, int h, Kernel kernel, boolean wrap) {
++		int radius = (int) kernel.radius();
++		int taps = radius * 2;
++
++		// two phases: the output pixel left (-0.25) and right (+0.25) of the centre of the source pixel
++		float[][] weights = new float[2][taps];
++		for (int phase = 0; phase < 2; phase++) {
++			float centre = phase == 0 ? -0.25f : 0.25f;
++			int first = (int) Math.floor(centre) - radius + 1;
++			float sum = 0;
++			for (int t = 0; t < taps; t++) {
++				weights[phase][t] = kernel.weight(first + t - centre);
++				sum += weights[phase][t];
++			}
++			for (int t = 0; t < taps; t++) {
++				weights[phase][t] /= sum;
++			}
++		}
++
++		int w2 = w * 2;
++		int h2 = h * 2;
++		float[] tmp = new float[w2 * h];
++		for (int y = 0; y < h; y++) {
++			for (int ox = 0; ox < w2; ox++) {
++				int phase = ox & 1;
++				int sx = ox >> 1;
++				int first = (phase == 0 ? -1 : 0) - radius + 1;
++				float v = 0;
++				for (int t = 0; t < taps; t++) {
++					int x = wrap ? Math.floorMod(sx + first + t, w) : Math.min(w - 1, Math.max(0, sx + first + t));
++					v += src[y * w + x] * weights[phase][t];
++				}
++				tmp[y * w2 + ox] = v;
++			}
++		}
++
++		float[] out = new float[w2 * h2];
++		for (int oy = 0; oy < h2; oy++) {
++			int phase = oy & 1;
++			int sy = oy >> 1;
++			int first = (phase == 0 ? -1 : 0) - radius + 1;
++			for (int x = 0; x < w2; x++) {
++				float v = 0;
++				for (int t = 0; t < taps; t++) {
++					int y = wrap ? Math.floorMod(sy + first + t, h) : Math.min(h - 1, Math.max(0, sy + first + t));
++					v += tmp[y * w2 + x] * weights[phase][t];
++				}
++				out[oy * w2 + x] = v;
++			}
++		}
++		return out;
++	}
++
++	private static float[] channel(int[] pixels, int shift) {
++		float[] c = new float[pixels.length];
++		for (int i = 0; i < c.length; i++) {
++			c[i] = (pixels[i] >>> shift) & 0xFF;
++		}
++		return c;
++	}
++
++	private static int clamp8(float v) {
++		return v <= 0 ? 0 : v >= 255 ? 255 : Math.round(v);
++	}
++
++	/**
++	 * Spreads the colours of the visible pixels into the transparent area around them (3 pixels). Only the colours of the transparent pixels are
++	 * changed (and they are not visible), the result has the same size.
++	 */
++	private static void dilate(float[] r, float[] g, float[] b, boolean[] valid, int w, int h) {
++		boolean[] known = valid.clone();
++		float avgR = 0, avgG = 0, avgB = 0;
++		int count = 0;
++		for (int i = 0; i < known.length; i++) {
++			if (known[i]) {
++				avgR += r[i];
++				avgG += g[i];
++				avgB += b[i];
++				count++;
++			}
++		}
++		if (count == 0) {
++			return;
++		}
++		avgR /= count;
++		avgG /= count;
++		avgB /= count;
++
++		for (int pass = 0; pass < 3; pass++) {
++			boolean[] next = known.clone();
++			for (int y = 0; y < h; y++) {
++				for (int x = 0; x < w; x++) {
++					int i = y * w + x;
++					if (known[i]) {
++						continue;
++					}
++					float sr = 0, sg = 0, sb = 0;
++					int n = 0;
++					for (int dy = -1; dy <= 1; dy++) {
++						for (int dx = -1; dx <= 1; dx++) {
++							int nx = x + dx;
++							int ny = y + dy;
++							if (nx < 0 || ny < 0 || nx >= w || ny >= h) {
++								continue;
++							}
++							int j = ny * w + nx;
++							if (known[j]) {
++								sr += r[j];
++								sg += g[j];
++								sb += b[j];
++								n++;
++							}
++						}
++					}
++					if (n > 0) {
++						r[i] = sr / n;
++						g[i] = sg / n;
++						b[i] = sb / n;
++						next[i] = true;
++					}
++				}
++			}
++			known = next;
++		}
++		for (int i = 0; i < known.length; i++) {
++			if (!known[i]) {
++				r[i] = avgR;
++				g[i] = avgG;
++				b[i] = avgB;
++			}
++		}
++	}
++
++	/**
++	 * The colours of a picture with the transparent area filled with the colours of the border (opaque). This is what the AI engine gets.
++	 */
++	public static BufferedImage dilatedRgb(int[] pixels, int w, int h) {
++		float[] r = channel(pixels, 24);
++		float[] g = channel(pixels, 16);
++		float[] b = channel(pixels, 8);
++		boolean[] valid = new boolean[pixels.length];
++		for (int i = 0; i < valid.length; i++) {
++			valid[i] = (pixels[i] & 0xFF) != 0;
++		}
++		dilate(r, g, b, valid, w, h);
++
++		BufferedImage image = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
++		for (int y = 0; y < h; y++) {
++			for (int x = 0; x < w; x++) {
++				int i = y * w + x;
++				image.setRGB(x, y, (clamp8(r[i]) << 16) | (clamp8(g[i]) << 8) | clamp8(b[i]));
++			}
++		}
++		return image;
++	}
++
++	/** The enlarged transparency, a little steeper, so the edge stays crisp but is no staircase. */
++	private static float[] enlargedAlpha(int[] pixels, int w, int h) {
++		float[] a = resample2x(channel(pixels, 0), w, h, LANCZOS3);
++		for (int i = 0; i < a.length; i++) {
++			float t = a[i] / 255f;
++			t = (t - 0.5f) * 1.6f + 0.5f;
++			a[i] = Math.max(0, Math.min(1, t)) * 255f;
++		}
++		return a;
++	}
++
++	private static int pack(int r, int g, int b, int a) {
++		if (a < 6) {
++			return 0;
++		}
++		return (r << 24) | (g << 16) | (b << 8) | a;
++	}
++
++	/**
++	 * Enlarges the image two times.
++	 *
++	 * @param pixels
++	 *            The pixels, w*h.
++	 * @return The enlarged pixels, 2w*2h.
++	 */
++	public static int[] upscale(int[] pixels, int w, int h, Kind kind) {
++		int[] result = new int[w * h * 4];
++		if (kind == Kind.MASK) {
++			float[][] c = new float[4][];
++			for (int i = 0; i < 4; i++) {
++				c[i] = resample2x(channel(pixels, 24 - 8 * i), w, h, CATMULL_ROM);
++			}
++			for (int i = 0; i < result.length; i++) {
++				int v = (clamp8(c[0][i]) << 24) | (clamp8(c[1][i]) << 16) | (clamp8(c[2][i]) << 8) | clamp8(c[3][i]);
++				result[i] = v;
++			}
++			return result;
++		}
++
++		if (kind == Kind.TORSO) {
++			// covered = any pixel that is not 0 (that is what the game checks)
++			float[] r = channel(pixels, 24);
++			float[] g = channel(pixels, 16);
++			float[] b = channel(pixels, 8);
++			boolean[] valid = new boolean[pixels.length];
++			for (int i = 0; i < valid.length; i++) {
++				valid[i] = pixels[i] != 0;
++			}
++			dilate(r, g, b, valid, w, h);
++			float[] b2 = resample2x(b, w, h, CATMULL_ROM);
++			for (int y = 0; y < h * 2; y++) {
++				for (int x = 0; x < w * 2; x++) {
++					if (valid[(y / 2) * w + x / 2]) {
++						result[y * w * 2 + x] = (clamp8(b2[y * w * 2 + x]) << 8) | 0xFF;
++					}
++				}
++			}
++			return result;
++		}
++
++		float[] r = channel(pixels, 24);
++		float[] g = channel(pixels, 16);
++		float[] b = channel(pixels, 8);
++		boolean[] valid = new boolean[pixels.length];
++		for (int i = 0; i < valid.length; i++) {
++			valid[i] = (pixels[i] & 0xFF) != 0;
++		}
++		dilate(r, g, b, valid, w, h);
++
++		float[] r2 = resample2x(r, w, h, LANCZOS3);
++		float[] g2 = resample2x(g, w, h, LANCZOS3);
++		float[] b2 = resample2x(b, w, h, LANCZOS3);
++		float[] a2 = kind == Kind.COLOR_EXACT_OUTLINE ? exactAlpha(pixels, w, h) : enlargedAlpha(pixels, w, h);
++		for (int i = 0; i < result.length; i++) {
++			result[i] = kind == Kind.COLOR_EXACT_OUTLINE ? packExact(clamp8(r2[i]), clamp8(g2[i]), clamp8(b2[i]), clamp8(a2[i]))
++					: pack(clamp8(r2[i]), clamp8(g2[i]), clamp8(b2[i]), clamp8(a2[i]));
++		}
++		return result;
++	}
++
++	/** The transparency copied pixel by pixel (every pixel becomes 2x2 pixels), so the outline is exactly the original one. */
++	private static float[] exactAlpha(int[] pixels, int w, int h) {
++		float[] a = new float[w * h * 4];
++		for (int y = 0; y < h * 2; y++) {
++			for (int x = 0; x < w * 2; x++) {
++				a[y * w * 2 + x] = pixels[(y / 2) * w + x / 2] & 0xFF;
++			}
++		}
++		return a;
++	}
++
++	private static int packExact(int r, int g, int b, int a) {
++		return a == 0 ? 0 : (r << 24) | (g << 16) | (b << 8) | a;
++	}
++
++	/**
++	 * Builds the enlarged image from the colours made by the AI engine (2w*2h, 0xRRGGBB, opaque) and the enlarged transparency of the original.
++	 */
++	public static int[] compose(int[] original, int w, int h, int[] enlargedRgb, boolean exactOutline) {
++		float[] a2 = exactOutline ? exactAlpha(original, w, h) : enlargedAlpha(original, w, h);
++		int[] result = new int[w * h * 4];
++		for (int i = 0; i < result.length; i++) {
++			int rgb = enlargedRgb[i];
++			int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
++			result[i] = exactOutline ? packExact(r, g, b, clamp8(a2[i])) : pack(r, g, b, clamp8(a2[i]));
++		}
++		return result;
++	}
++
++	/**
++	 * Enlarges a terrain texture (a repeating tile, without transparency) two times. The edges fit to the opposite edges, so the tiles stay seamless.
++	 */
++	public static int[] upscaleTile(int[] pixels, int w, int h) {
++		float[][] c = new float[4][];
++		for (int i = 0; i < 4; i++) {
++			c[i] = resample2x(channel(pixels, 24 - 8 * i), w, h, LANCZOS3, true);
++		}
++		int[] result = new int[w * h * 4];
++		for (int i = 0; i < result.length; i++) {
++			result[i] = (clamp8(c[0][i]) << 24) | (clamp8(c[1][i]) << 16) | (clamp8(c[2][i]) << 8) | clamp8(c[3][i]);
++		}
++		return result;
++	}
++
++	/** How many pixels of the neighbouring repetition the AI engine gets around a terrain tile. */
++	public static final int TILE_PAD = 16;
++
++	/**
++	 * A terrain tile for the AI engine: the tile with a border of the neighbouring repetitions (so the result has no seams).
++	 */
++	public static BufferedImage paddedTile(int[] pixels, int w, int h) {
++		BufferedImage image = new BufferedImage(w + 2 * TILE_PAD, h + 2 * TILE_PAD, BufferedImage.TYPE_INT_RGB);
++		for (int y = 0; y < h + 2 * TILE_PAD; y++) {
++			for (int x = 0; x < w + 2 * TILE_PAD; x++) {
++				int p = pixels[Math.floorMod(y - TILE_PAD, h) * w + Math.floorMod(x - TILE_PAD, w)];
++				image.setRGB(x, y, p >>> 8);
++			}
++		}
++		return image;
++	}
++
++	/**
++	 * Cuts the enlarged tile out of the enlarged padded tile.
++	 *
++	 * @param enlargedRgb
++	 *            The enlarged padded tile (2*(w+2*pad) wide).
++	 */
++	public static int[] composeTile(int[] original, int w, int h, int[] enlargedRgb) {
++		int[] plain = upscaleTile(original, w, h);
++		int paddedWidth = 2 * (w + 2 * TILE_PAD);
++		int[] result = new int[w * h * 4];
++		for (int y = 0; y < h * 2; y++) {
++			for (int x = 0; x < w * 2; x++) {
++				int rgb = enlargedRgb[(y + 2 * TILE_PAD) * paddedWidth + x + 2 * TILE_PAD];
++				result[y * w * 2 + x] = (rgb << 8) | (plain[y * w * 2 + x] & 0xFF);
++			}
++		}
++		return result;
++	}
++}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/image/reader/AdvancedDatFileReader.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/reader/AdvancedDatFileReader.java
+index 1161efd4d..57ab6efe3 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/image/reader/AdvancedDatFileReader.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/reader/AdvancedDatFileReader.java
+@@ -29,6 +29,7 @@ import jsettlers.graphics.image.SettlerImage;
+ import jsettlers.graphics.image.reader.bytereader.ByteReader;
+ import jsettlers.graphics.image.reader.shadowmap.IdentityShadowMapping;
+ import jsettlers.graphics.image.reader.shadowmap.ShadowMapping;
++import jsettlers.graphics.image.hd.HdCacheFile;
+ import jsettlers.graphics.image.reader.translator.DatBitmapTranslator;
+ import jsettlers.graphics.image.reader.translator.GuiTranslator;
+ import jsettlers.graphics.image.reader.translator.LandscapeTranslator;
+@@ -242,6 +243,11 @@ public class AdvancedDatFileReader implements DatFileReader {
+ 	private final DatFileType type;
+ 	private final String file_name;
+ 
++	/**
++	 * The enlarged ("HD") versions of the settler images, or null if the HD graphics are not used.
++	 */
++	private HdCacheFile hdCache = null;
++
+ 	public AdvancedDatFileReader(File file, DatFileType type, String file_name) {
+ 		this(file, type, new DefaultDatFileMapping(), new IdentityShadowMapping(), file_name);
+ 	}
+@@ -538,14 +544,14 @@ public class AdvancedDatFileReader implements DatFileReader {
+ 
+ 		SettlerImage[] images = new SettlerImage[framePositions.length];
+ 		for (int i = 0; i < framePositions.length; i++) {
+-			images[i] = DatBitmapReader.getImage(settlerTranslator, this, framePositions[i], name + "-S" + goldIndex + ":" + i);
++			images[i] = DatBitmapReader.getImage(settlerTranslator, this, framePositions[i], name + "-S" + goldIndex + ":" + i, hdCache, HdCacheFile.KIND_SETTLER);
+ 		}
+ 
+ 		int torsoPosition = torsoStarts[realSettlerIndex];
+ 		if (torsoPosition >= 0) {
+ 			long[] torsoPositions = readSequenceHeader(torsoPosition);
+ 			for (int i = 0; i < torsoPositions.length && i < framePositions.length; i++) {
+-				SingleImage torso = DatBitmapReader.getImage(torsoTranslator, this, torsoPositions[i], name + "-T" + goldIndex + ":" + i);
++				SingleImage torso = DatBitmapReader.getImage(torsoTranslator, this, torsoPositions[i], name + "-T" + goldIndex + ":" + i, hdCache, HdCacheFile.KIND_TORSO);
+ 				images[i].setTorso(torso);
+ 			}
+ 		}
+@@ -555,7 +561,7 @@ public class AdvancedDatFileReader implements DatFileReader {
+ 			long[] shadowPositions = readSequenceHeader(shadowPosition);
+ 			for (int i = 0; i < shadowPositions.length
+ 				&& i < framePositions.length; i++) {
+-				SingleImage shadow = DatBitmapReader.getImage(shadowTranslator, this, shadowPositions[i], name + "-SH" + goldIndex + ":" + i);
++				SingleImage shadow = DatBitmapReader.getImage(shadowTranslator, this, shadowPositions[i], name + "-SH" + goldIndex + ":" + i, hdCache, HdCacheFile.KIND_SHADOW);
+ 				images[i].setShadow(shadow);
+ 			}
+ 		}
+@@ -639,7 +645,7 @@ public class AdvancedDatFileReader implements DatFileReader {
+ 		initializeIfNeeded();
+ 
+ 		try {
+-			SingleImage image = DatBitmapReader.getImage(landscapeTranslator, this, landscapeStarts[index], name);
++			SingleImage image = DatBitmapReader.getImage(landscapeTranslator, this, landscapeStarts[index], name, hdCache, HdCacheFile.KIND_LANDSCAPE);
+ 			landscapeImages[index] = image;
+ 		} catch (IOException e) {
+ 			landscapeImages[index] = NullImage.getForLandscape();
+@@ -692,13 +698,103 @@ public class AdvancedDatFileReader implements DatFileReader {
+ 		initializeIfNeeded();
+ 		try {
+ 			int theseGraphicsFilesIndex = mapping.mapGuiImage(goldIndex);
+-			SingleImage image = DatBitmapReader.getImage(guiTranslator, this, guiStarts[theseGraphicsFilesIndex], name);
++			SingleImage image = DatBitmapReader.getImage(guiTranslator, this, guiStarts[theseGraphicsFilesIndex], name, hdCache, HdCacheFile.KIND_GUI);
+ 			guiImages[goldIndex] = image;
+ 		} catch (IOException | ArrayIndexOutOfBoundsException e) {
+ 			guiImages[goldIndex] = NullImage.getForGui();
+ 		}
+ 	}
+ 
++	/**
++	 * Sets the enlarged images that are used instead of the original settler images. Has to be called before the images are loaded.
++	 */
++	public void setHdCache(HdCacheFile hdCache) {
++		this.hdCache = hdCache;
++	}
++
++	public File getFile() {
++		return file;
++	}
++
++	@Override
++	public go.graphics.ImageData getHdLandscape(int index) {
++		initializeIfNeeded();
++		if (hdCache == null || index < 0 || index >= landscapeStarts.length) {
++			return null;
++		}
++		return hdCache.get(HdCacheFile.key(landscapeStarts[index], HdCacheFile.KIND_LANDSCAPE));
++	}
++
++	public DatBitmapTranslator<SingleImage> getGuiTranslator() {
++		return guiTranslator;
++	}
++
++	public DatFileType getType() {
++		return type;
++	}
++
++	/**
++	 * Collects the positions of all images that are enlarged by the HD graphics: settler sequences (including torsos and shadows), terrain and gui images.
++	 *
++	 * @param positions
++	 *            Receives the keys ({@link HdCacheFile#key(long, int)}).
++	 */
++	public synchronized void collectSettlerImagePositions(java.util.Set<Long> positions) {
++		collectSettlerImagePositions(positions, new java.util.HashSet<>());
++	}
++
++	/**
++	 * @param spritesWithTorso
++	 *            Receives the keys of the settler images that are drawn together with a torso (team colour). Their outline must stay exactly as
++	 *            it is, otherwise holes appear between the sprite and its torso.
++	 */
++	public synchronized void collectSettlerImagePositions(java.util.Set<Long> positions, java.util.Set<Long> spritesWithTorso) {
++		initializeIfNeeded();
++		for (int i = 0; i < settlerStarts.length; i++) {
++			if (settlerStarts[i] < 0 || torsoStarts[i] < 0) {
++				continue;
++			}
++			try {
++				long[] sprites = readSequenceHeader(settlerStarts[i]);
++				int torsos = readSequenceHeader(torsoStarts[i]).length;
++				for (int j = 0; j < sprites.length && j < torsos; j++) {
++					spritesWithTorso.add(HdCacheFile.key(sprites[j], HdCacheFile.KIND_SETTLER));
++				}
++			} catch (Exception e) {
++				// not a valid sequence
++			}
++		}
++		collectPositions(settlerStarts, HdCacheFile.KIND_SETTLER, positions);
++		collectPositions(torsoStarts, HdCacheFile.KIND_TORSO, positions);
++		collectPositions(shadowStarts, HdCacheFile.KIND_SHADOW, positions);
++		// landscape and gui "starts" are the positions of the images themselves
++		for (int start : landscapeStarts) {
++			if (start > 0) {
++				positions.add(HdCacheFile.key(start, HdCacheFile.KIND_LANDSCAPE));
++			}
++		}
++		for (int start : guiStarts) {
++			if (start > 0) {
++				positions.add(HdCacheFile.key(start, HdCacheFile.KIND_GUI));
++			}
++		}
++	}
++
++	private void collectPositions(int[] starts, int kind, java.util.Set<Long> positions) {
++		for (int start : starts) {
++			if (start < 0) {
++				continue;
++			}
++			try {
++				for (long position : readSequenceHeader(start)) {
++					positions.add(HdCacheFile.key(position, kind));
++				}
++			} catch (Exception e) {
++				// not a valid sequence, there are no images to enlarge
++			}
++		}
++	}
++
+ 	public long[] getSettlerPointers(int seqIndex) throws IOException {
+ 		initializeIfNeeded();
+ 		return readSequenceHeader(settlerStarts[seqIndex]);
+@@ -722,6 +818,10 @@ public class AdvancedDatFileReader implements DatFileReader {
+ 		return torsoTranslator;
+ 	}
+ 
++	public DatBitmapTranslator<SingleImage> getShadowTranslator() {
++		return shadowTranslator;
++	}
++
+ 	@Override
+ 	public DatBitmapTranslator<SingleImage> getLandscapeTranslator() {
+ 		return landscapeTranslator;
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/image/reader/DatBitmapReader.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/reader/DatBitmapReader.java
+index c69c69cd5..df566c87b 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/image/reader/DatBitmapReader.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/reader/DatBitmapReader.java
+@@ -17,6 +17,8 @@ package jsettlers.graphics.image.reader;
+ import java.io.IOException;
+ 
+ import jsettlers.graphics.image.Image;
++import jsettlers.graphics.image.hd.HdCacheFile;
++import jsettlers.graphics.image.hd.HdGraphics;
+ import jsettlers.graphics.image.reader.bytereader.ByteReader;
+ import jsettlers.graphics.image.reader.translator.HeaderType;
+ import jsettlers.graphics.image.reader.translator.DatBitmapTranslator;
+@@ -238,9 +240,29 @@ public final class DatBitmapReader<T extends Image> {
+ 	public static <T extends Image> T getImage(
+ 			DatBitmapTranslator<T> translator, AdvancedDatFileReader reader, long position, String name)
+ 			throws IOException {
++		return getImage(translator, reader, position, name, null, 0);
++	}
++
++	/**
++	 * Like {@link #getImage(DatBitmapTranslator, AdvancedDatFileReader, long, String)}, but uses the enlarged image of the HD graphics if there is one.
++	 *
++	 * @param hdCache
++	 *            The enlarged images, may be null.
++	 * @param hdKind
++	 *            The kind of the image, see {@link HdCacheFile#KIND_SETTLER}.
++	 */
++	public static <T extends Image> T getImage(
++			DatBitmapTranslator<T> translator, AdvancedDatFileReader reader, long position, String name, HdCacheFile hdCache, int hdKind)
++			throws IOException {
+ 		ImageMetadata metadata = new ImageMetadata();
+ 		long dataPos = reader.readImageHeader(translator, metadata, position);
+ 		return translator.createImage(metadata, () -> {
++			if (hdCache != null && metadata.width > 0 && metadata.height > 0) {
++				ImageData hd = hdCache.get(HdCacheFile.key(position, hdKind));
++				if (hd != null && hd.getWidth() == metadata.width * HdGraphics.SCALE && hd.getHeight() == metadata.height * HdGraphics.SCALE) {
++					return hd;
++				}
++			}
+ 			IntArrayWriter array = new IntArrayWriter();
+ 			try {
+ 				reader.readCompressedData(translator, metadata, array, dataPos);
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/image/reader/DatFileReader.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/reader/DatFileReader.java
+index 4d6adbbf6..dd9e3f14d 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/image/reader/DatFileReader.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/image/reader/DatFileReader.java
+@@ -27,6 +27,15 @@ public interface DatFileReader extends DatFileSet {
+ 
+ 	long getOffsetForLandscape(int index);
+ 
++	/**
++	 * Gets the enlarged version of a landscape (terrain) image if the HD graphics are used.
++	 *
++	 * @return The image (twice the size of the original) or null.
++	 */
++	default go.graphics.ImageData getHdLandscape(int index) {
++		return null;
++	}
++
+ 	<T extends Image> long readImageHeader(DatBitmapTranslator<T> translator,
+ 										   ImageMetadata metadata,
+ 										   long offset) throws IOException;
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/Background.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/Background.java
+index 499cb3626..463762dac 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/Background.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/Background.java
+@@ -41,6 +41,7 @@ import jsettlers.common.position.FloatRectangle;
+ import jsettlers.graphics.image.Image;
+ import jsettlers.graphics.image.NullImage;
+ import jsettlers.graphics.image.SingleImage;
++import jsettlers.graphics.image.hd.HdGraphics;
+ import jsettlers.graphics.image.reader.translator.DatBitmapTranslator;
+ import jsettlers.graphics.map.MapDrawContext;
+ import jsettlers.graphics.image.reader.DatFileReader;
+@@ -70,6 +71,9 @@ public class Background implements IGraphicsBackgroundListener {
+ 	 */
+ 	private static final int TEXTURE_GRID = 32;
+ 
++	/** How far (in pixels of the original texture) the points are kept inside of a texture when the HD terrain is used. */
++	private static final float HD_TEXTURE_INSET = 0.5f;
++
+ 	private static final int BYTES_PER_FIELD = 4*6*3*2; // 4 bytes per float * 6 components(x,y,z,t,v,color) * 3 points per triangle * 2 triangles per field
+ 
+ 	/**
+@@ -864,15 +868,20 @@ public class Background implements IGraphicsBackgroundListener {
+ 	private final int mapWidth, mapHeight;
+ 
+ 	private static ImageData getTextureData(boolean original) {
+-		int[] data = new int[TEXTURE_SIZE * TEXTURE_SIZE];
+-		try {
+-			addTextures(data);
+-		} catch (IOException e) {
+-			e.printStackTrace();
+-		}
++		// the HD graphics: the same texture, but with the enlarged images (twice the size, the coordinates are relative, so nothing else changes)
++		ImageData orig = createHdTextureData();
++
++		if (orig == null) {
++			int[] data = new int[TEXTURE_SIZE * TEXTURE_SIZE];
++			try {
++				addTextures(data);
++			} catch (IOException e) {
++				e.printStackTrace();
++			}
+ 
+-		ImageData orig = new ImageData(TEXTURE_SIZE, TEXTURE_SIZE);
+-		orig.getWriteData32().put(data).rewind();
++			orig = new ImageData(TEXTURE_SIZE, TEXTURE_SIZE);
++			orig.getWriteData32().put(data).rewind();
++		}
+ 
+ 		if(original) {
+ 			return orig;
+@@ -928,6 +937,10 @@ public class Background implements IGraphicsBackgroundListener {
+ 			long startTime = System.currentTimeMillis();
+ 			ImageData data = getTextureData(original);
+ 			texture = context.generateTexture(data, "background-" + (original?"original":"custom"));
++			if (data.getWidth() > TEXTURE_SIZE) {
++				// the HD terrain is smoothed when it is zoomed (the coordinates are kept inside the cells, see addTriangleToGeometry)
++				texture.setType(go.graphics.ETextureType.LINEAR_FILTER);
++			}
+ 			textures.put(original, texture);
+ 
+ 			System.out.println("Background texture generated in " + (System.currentTimeMillis() - startTime) + "ms");
+@@ -940,7 +953,70 @@ public class Background implements IGraphicsBackgroundListener {
+ 		return getTextureData(context, DrawConstants.FORCE_ORIGINAL);
+ 	}
+ 
++	/**
++	 * Creates the texture from the enlarged landscape images.
++	 *
++	 * @return The texture or null if the HD graphics are not used or an enlarged image is missing.
++	 */
++	private static ImageData createHdTextureData() {
++		if (!HdGraphics.isEnabled()) {
++			return null;
++		}
++		DatFileReader reader = ImageProvider.getInstance().getFileReader(LAND_FILE);
++		if (reader == null) {
++			HdGraphics.log("the terrain graphics file was not found, the original terrain is used.");
++			return null;
++		}
++
++		final int scale = HdGraphics.SCALE;
++		final int size = TEXTURE_SIZE * scale;
++		int[] data = new int[size * size];
++		ImageWriter imageWriter = new ImageWriter();
++		imageWriter.data = data;
++		imageWriter.stride = size;
++
++		for (int index = 0; index < TEXTURE_POSITIONS.length; index++) {
++			ImageData hd = reader.getHdLandscape(index);
++			if (hd == null) {
++				HdGraphics.log("the enlarged terrain texture " + index + " is missing, the original terrain is used.");
++				return null;
++			}
++			int[] position = TEXTURE_POSITIONS[index];
++			int x = position[0] * TEXTURE_GRID * scale;
++			int y = position[1] * TEXTURE_GRID * scale;
++			int start = y * size + x;
++			int cellSize = position[2] * TEXTURE_GRID * scale;
++			int end = (y + cellSize) * size + x;
++			imageWriter.arrayOffset = start;
++			imageWriter.cellSize = cellSize;
++			imageWriter.maxOffset = end;
++
++			// the same as for the original images
++			IntBuffer pixels = hd.getReadData32();
++			int[] line = new int[hd.getWidth()];
++			for (int row = 0; row < hd.getHeight(); row++) {
++				pixels.position(row * hd.getWidth());
++				pixels.get(line);
++				imageWriter.writeLine(line, line.length);
++			}
++			pixels.rewind();
++
++			int arrayOffset = imageWriter.arrayOffset;
++			int l = arrayOffset - start;
++			while (arrayOffset < end) {
++				System.arraycopy(data, arrayOffset - l, data, arrayOffset, cellSize);
++				arrayOffset += size;
++			}
++		}
++
++		ImageData result = new ImageData(size, size);
++		result.getWriteData32().put(data).rewind();
++		HdGraphics.log("HD terrain texture " + size + "x" + size + " is used.");
++		return result;
++	}
++
+ 	private static class ImageWriter implements ImageArrayProvider {
++		int stride = TEXTURE_SIZE;
+ 		int arrayOffset;
+ 		int cellSize;
+ 		int maxOffset;
+@@ -957,7 +1033,7 @@ public class Background implements IGraphicsBackgroundListener {
+ 				for (int i = 0; i < cellSize; i++) {
+ 					this.data[arrayOffset + i] = data[i % length];
+ 				}
+-				arrayOffset += TEXTURE_SIZE;
++				arrayOffset += stride;
+ 			}
+ 		}
+ 	}
+@@ -1304,22 +1380,39 @@ public class Background implements IGraphicsBackgroundListener {
+ 		addDx += positions[0] * TEXTURE_GRID;
+ 		addDy += positions[1] * TEXTURE_GRID;
+ 
++		// With the smoothed HD terrain the points on the border of a texture would also pick up colours of the neighbouring texture in the
++		// atlas (a thin wrong line between two terrain types). So the points are kept half a pixel inside of the texture.
++		float minU = positions[0] * TEXTURE_GRID;
++		float minV = positions[1] * TEXTURE_GRID;
++		float maxU = Float.POSITIVE_INFINITY;
++		float maxV = Float.POSITIVE_INFINITY;
++		if (HdGraphics.isEnabled()) {
++			maxU = minU + positions[2] * TEXTURE_GRID - HD_TEXTURE_INSET;
++			maxV = minV + positions[2] * TEXTURE_GRID - HD_TEXTURE_INSET;
++			minU += HD_TEXTURE_INSET;
++			minV += HD_TEXTURE_INSET;
++		} else {
++			// the original game: nothing is changed
++			minU = Float.NEGATIVE_INFINITY;
++			minV = Float.NEGATIVE_INFINITY;
++		}
++
+ 		{
+ 			// left
+-			float u = (texturePos[0] + addDx) / TEXTURE_SIZE;
+-			float v = (texturePos[1] + addDy) / TEXTURE_SIZE;
++			float u = Math.min(maxU, Math.max(minU, texturePos[0] + addDx)) / TEXTURE_SIZE;
++			float v = Math.min(maxV, Math.max(minV, texturePos[1] + addDy)) / TEXTURE_SIZE;
+ 			addPointToGeometry(context, buffer, up?x2:x1, up?y2:y1, u, v);
+ 		}
+ 		{
+ 			// bottom
+-			float u = (texturePos[2] + addDx) / TEXTURE_SIZE;
+-			float v = (texturePos[3] + addDy) / TEXTURE_SIZE;
++			float u = Math.min(maxU, Math.max(minU, texturePos[2] + addDx)) / TEXTURE_SIZE;
++			float v = Math.min(maxV, Math.max(minV, texturePos[3] + addDy)) / TEXTURE_SIZE;
+ 			addPointToGeometry(context, buffer, up?x1:x2, up?y1:y2, u, v);
+ 		}
+ 		{
+ 			// right
+-			float u = (texturePos[4] + addDx) / TEXTURE_SIZE;
+-			float v = (texturePos[5] + addDy) / TEXTURE_SIZE;
++			float u = Math.min(maxU, Math.max(minU, texturePos[4] + addDx)) / TEXTURE_SIZE;
++			float v = Math.min(maxV, Math.max(minV, texturePos[5] + addDy)) / TEXTURE_SIZE;
+ 			addPointToGeometry(context, buffer, x3, y3, u, v);
+ 		}
+ 
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/ImageProvider.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/ImageProvider.java
+index 2cecfc854..cbbbda473 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/ImageProvider.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/ImageProvider.java
+@@ -25,6 +25,7 @@ import jsettlers.graphics.image.Image;
+ import jsettlers.graphics.image.ImageIndexFile;
+ import jsettlers.graphics.image.SingleImage;
+ import jsettlers.graphics.image.NullImage;
++import jsettlers.graphics.image.hd.HdGraphics;
+ import jsettlers.graphics.image.reader.AdvancedDatFileReader;
+ import jsettlers.graphics.image.reader.DatFileReader;
+ import jsettlers.graphics.image.reader.DatFileSet;
+@@ -319,7 +320,11 @@ public final class ImageProvider {
+ 			ShadowMapping shadowMapping = ShadowMapping.getMappingFor(fileIndex);
+ 
+ 			if (file != null) {
+-				reader = new AdvancedDatFileReader(file, type, gfxFolderMapping.getDatFileMapping(fileIndex), shadowMapping, "F" + fileIndex);
++				AdvancedDatFileReader datReader = new AdvancedDatFileReader(file, type, gfxFolderMapping.getDatFileMapping(fileIndex), shadowMapping, "F" + fileIndex);
++				if (HdGraphics.isEnabled()) {
++					datReader.setHdCache(HdGraphics.openCache(file));
++				}
++				reader = datReader;
+ 				break;
+ 			}
+ 		}
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index 2e57b608e..6788bb81f 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -618,3 +618,11 @@ error-rendering = Došlo k chybě :/\nNahlašte prosím tuto chybu na GitHubu\nP
+ 
+ flatpak-title=Vyberte složku s originální hrou
+ flatpak-description=JSettlers ke spuštění potřebuje soubory s grafikou a zvukem z instalace Settlers 3.\nPokud kopii nevlastníte, přečtěte si README na naší stránce GitHub.\nChcete-li pokračovat, musíte nyní vybrat složku s takovou instalací.
++settings-hd-graphics = HD grafika (nutný restart)
++settings-hd-graphics-no = Ne
++settings-hd-graphics-yes = Ano
++settings-hd-graphics-restart = HD grafika se použije po restartu hry. Při prvním zapnutí se při dalším startu vytvoří zvětšené obrázky z vašich původních herních souborů, což potrvá několik minut.
++settings-hd-graphics-restart-short = Změna se projeví po restartu hry.
++hd-graphics-title = HD grafika
++hd-graphics-preparing = Zvětšuji původní grafiku (jen poprvé) ...
++hd-graphics-remaining = zbývá asi %d min
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 1c1c85c37..7bcff886b 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -623,4 +623,12 @@ errordlg-start-failed = Unexpected Error occurred:
+ error-rendering = An error has occured :/\nPlease report this bug on GitHub\nTake note of the "Found a bug?" section in the readme\n(github.com/paulwedeck/settlers-remake)\n\n%s
+ 
+ flatpak-title=Select original game directory
+-flatpak-description=JSettlers needs graphics and sound files from a Settlers 3 installation to run.\nIf you don't own a copy read the README on our GitHub page.\nYou must now select such an installation directory to proceed.
+\ No newline at end of file
++flatpak-description=JSettlers needs graphics and sound files from a Settlers 3 installation to run.\nIf you don't own a copy read the README on our GitHub page.\nYou must now select such an installation directory to proceed.
++settings-hd-graphics = HD graphics (needs restart)
++settings-hd-graphics-no = No
++settings-hd-graphics-yes = Yes
++settings-hd-graphics-restart = The HD graphics are used after the game is restarted. When they are switched on for the first time, the enlarged images are made from your original game files at the next start, which takes a few minutes.
++settings-hd-graphics-restart-short = The change is applied after the game is restarted.
++hd-graphics-title = HD graphics
++hd-graphics-preparing = Enlarging the original graphics (only the first time) ...
++hd-graphics-remaining = about %d min left
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/settingsmenu/SettingsMenuPanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/settingsmenu/SettingsMenuPanel.java
+index 64fcc7ae6..af4b5fec3 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/settingsmenu/SettingsMenuPanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/settingsmenu/SettingsMenuPanel.java
+@@ -16,6 +16,7 @@ package jsettlers.main.swing.menu.settingsmenu;
+ 
+ import java.awt.BorderLayout;
+ import java.awt.GridLayout;
++import java.io.File;
+ 
+ import javax.swing.JButton;
+ import javax.swing.JCheckBox;
+@@ -23,10 +24,12 @@ import javax.swing.JComboBox;
+ import javax.swing.JComponent;
+ import javax.swing.JLabel;
+ import javax.swing.JPanel;
++import javax.swing.JOptionPane;
+ import javax.swing.JTextField;
+ import javax.swing.SwingUtilities;
+ 
+ import go.graphics.swing.contextcreator.BackendSelector;
++import jsettlers.graphics.image.hd.HdGraphics;
+ import jsettlers.graphics.localization.Labels;
+ import jsettlers.main.swing.lookandfeel.ELFStyle;
+ import jsettlers.main.swing.menu.mainmenu.MainMenuPanel;
+@@ -54,6 +57,7 @@ public class SettingsMenuPanel extends JPanel {
+ 	private final SettingsSlider fpsLimitSlider = new SettingsSlider("fps", 0,240, Labels.getString("settings-fps-limit-none"));
+ 	private final SettingsSlider guiScaleSlider = new SettingsSlider("%", 50,400, Labels.getString("settings-gui-scale-default"));
+ 	private final JComboBox<GameLanguage> languageSelector = new JComboBox<>(GameLanguage.values());
++	private final JComboBox<HdOption> hdSelector = new JComboBox<>(HdOption.values());
+ 	private final JCheckBox aiTowerFocusCheckBox = new JCheckBox();
+ 	private final BackendSelector backendSelector = new BackendSelector();
+ 
+@@ -78,6 +82,8 @@ public class SettingsMenuPanel extends JPanel {
+ 		backendSelector.putClientProperty(ELFStyle.KEY, ELFStyle.COMBOBOX);
+ 		languageSelector.putClientProperty(ELFStyle.KEY, ELFStyle.COMBOBOX);
+ 		languageSelector.setEditable(false);
++		hdSelector.putClientProperty(ELFStyle.KEY, ELFStyle.COMBOBOX);
++		hdSelector.setEditable(false);
+ 		
+ 		SwingUtilities.updateComponentTreeUI(playerNameField);
+ 		addSetting("settings-name", playerNameField);
+@@ -95,6 +101,7 @@ public class SettingsMenuPanel extends JPanel {
+ 		addSetting("settings-backend", backendSelector);
+ 
+ 		addSetting("settings-gui-scale", guiScaleSlider);
++		addSetting("settings-hd-graphics", hdSelector);
+ 		addSetting("settings-ai-tower-focus", aiTowerFocusCheckBox);
+ 		
+ 		initButton();
+@@ -136,14 +143,26 @@ public class SettingsMenuPanel extends JPanel {
+ 			settingsManager.setGuiScale(guiScaleSlider.getValue()/100f);
+ 			settingsManager.setAiNoPioneers(aiTowerFocusCheckBox.isSelected());
+ 
++			HdOption selectedHd = (HdOption) hdSelector.getSelectedItem();
++			boolean hdChanged = selectedHd != null && selectedHd.enabled != settingsManager.isHdGraphics();
++			if (hdChanged) {
++				settingsManager.setHdGraphics(selectedHd.enabled);
++			}
++
+ 			GameLanguage selectedLanguage = (GameLanguage) languageSelector.getSelectedItem();
+ 			if (selectedLanguage != null && selectedLanguage != GameLanguage.fromLocale(settingsManager.getLocale())) {
+ 				settingsManager.setLocale(selectedLanguage.getLocale());
+ 				// replaces all menus (including this one), so there is nothing left to reset here
+ 				mainMenuPanel.languageChanged();
++				if (hdChanged) {
++					showHdRestartNotice(selectedHd.enabled);
++				}
+ 				return;
+ 			}
+ 			mainMenuPanel.reset();
++			if (hdChanged) {
++				showHdRestartNotice(selectedHd.enabled);
++			}
+ 		});
+ 
+ 		JPanel buttonPanel = new JPanel();
+@@ -163,6 +182,43 @@ public class SettingsMenuPanel extends JPanel {
+ 		fpsLimitSlider.setValue(settingsManager.getFpsLimit());
+ 		backendSelector.setSelectedItem(settingsManager.getBackend());
+ 		guiScaleSlider.setValue(Math.round(settingsManager.getGuiScale()*100));
++		hdSelector.setSelectedItem(settingsManager.isHdGraphics() ? HdOption.YES : HdOption.NO);
+ 		aiTowerFocusCheckBox.setSelected(settingsManager.getAiTowerFocus());
+ 	}
++
++	/**
++	 * Tells the player that the HD setting needs a restart. The dialog has no button, it is just closed with the window (like the native dialogs on
++	 * macOS). The remark about the first start is only shown while no enlarged images exist yet.
++	 */
++	private void showHdRestartNotice(boolean enabled) {
++		String key = enabled && !hasHdImages() ? "settings-hd-graphics-restart" : "settings-hd-graphics-restart-short";
++		JOptionPane.showOptionDialog(this, Labels.getString(key), Labels.getString("settings-hd-graphics"), JOptionPane.DEFAULT_OPTION,
++				JOptionPane.INFORMATION_MESSAGE, null, new Object[0], null);
++	}
++
++	private static boolean hasHdImages() {
++		File[] files = HdGraphics.getCacheDir().listFiles((dir, name) -> name.endsWith(".hd"));
++		return files != null && files.length > 0;
++	}
++
++	/**
++	 * The choices of the HD graphics setting.
++	 */
++	private enum HdOption {
++		NO(false, "settings-hd-graphics-no"),
++		YES(true, "settings-hd-graphics-yes");
++
++		private final boolean enabled;
++		private final String labelKey;
++
++		HdOption(boolean enabled, String labelKey) {
++			this.enabled = enabled;
++			this.labelKey = labelKey;
++		}
++
++		@Override
++		public String toString() {
++			return Labels.getString(labelKey);
++		}
++	}
+ }
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/resources/HdSetup.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/resources/HdSetup.java
+new file mode 100644
+index 000000000..52938290e
+--- /dev/null
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/resources/HdSetup.java
+@@ -0,0 +1,99 @@
++/*******************************************************************************
++ * Copyright (c) 2026
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ *******************************************************************************/
++package jsettlers.main.swing.resources;
++
++import java.awt.BorderLayout;
++import java.awt.GraphicsEnvironment;
++import java.io.File;
++
++import javax.swing.BorderFactory;
++import javax.swing.JDialog;
++import javax.swing.JLabel;
++import javax.swing.JProgressBar;
++import javax.swing.SwingUtilities;
++
++import jsettlers.graphics.image.hd.HdGraphics;
++import jsettlers.graphics.localization.Labels;
++
++/**
++ * Prepares the HD graphics when the game starts: makes the enlarged images if they do not exist yet and shows the progress.
++ */
++final class HdSetup {
++	private HdSetup() {
++	}
++
++	static void prepare(File gfxFolder) {
++		HdGraphics.setEnabled(true);
++
++		JDialog[] dialog = new JDialog[1];
++		JLabel[] info = new JLabel[1];
++		JProgressBar[] bar = new JProgressBar[1];
++		boolean showDialog = !GraphicsEnvironment.isHeadless();
++		long[] start = {0};
++
++		try {
++			HdGraphics.prepare(gfxFolder, (text, done, total) -> {
++				if (!showDialog) {
++					return;
++				}
++				if (start[0] == 0) {
++					start[0] = System.currentTimeMillis();
++				}
++				Runnable update = () -> {
++					if (dialog[0] == null) {
++						JLabel title = new JLabel(Labels.getString("hd-graphics-preparing"));
++						info[0] = new JLabel(" ");
++						bar[0] = new JProgressBar(0, 1000);
++						bar[0].setStringPainted(true);
++						dialog[0] = new JDialog((java.awt.Frame) null, Labels.getString("hd-graphics-title"), false);
++						dialog[0].setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
++						dialog[0].setLayout(new BorderLayout(10, 10));
++						((javax.swing.JComponent) dialog[0].getContentPane()).setBorder(BorderFactory.createEmptyBorder(15, 20, 15, 20));
++						dialog[0].add(title, BorderLayout.NORTH);
++						dialog[0].add(bar[0], BorderLayout.CENTER);
++						dialog[0].add(info[0], BorderLayout.SOUTH);
++						dialog[0].setSize(520, 150);
++						dialog[0].setLocationRelativeTo(null);
++						dialog[0].setVisible(true);
++					}
++					bar[0].setValue(total == 0 ? 0 : (int) (done * 1000L / total));
++					String remaining = "";
++					long elapsed = System.currentTimeMillis() - start[0];
++					if (done > 50 && elapsed > 5000) {
++						long seconds = elapsed * (total - done) / done / 1000;
++						remaining = Labels.getString("hd-graphics-remaining", Math.max(1, (seconds + 30) / 60));
++					}
++					bar[0].setString(done + " / " + total);
++					info[0].setText(text + (remaining.isEmpty() ? "" : "   -   " + remaining));
++				};
++				if (SwingUtilities.isEventDispatchThread()) {
++					update.run();
++				} else {
++					SwingUtilities.invokeLater(update);
++				}
++			});
++		} catch (RuntimeException | Error e) {
++			e.printStackTrace();
++		} finally {
++			if (showDialog) {
++				SwingUtilities.invokeLater(() -> {
++					if (dialog[0] != null) {
++						dialog[0].dispose();
++					}
++				});
++			}
++		}
++	}
++}
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/resources/SwingResourceLoader.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/resources/SwingResourceLoader.java
+index 9be5a225e..ff93cb33c 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/resources/SwingResourceLoader.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/resources/SwingResourceLoader.java
+@@ -53,6 +53,11 @@ public class SwingResourceLoader {
+ 			SettingsManager.getInstance().setSettlersVersionId(settlersVersionId);
+ 		}
+ 
++		// the HD graphics: enlarged images, made once from the original graphics (see HdGraphics)
++		if (SettingsManager.getInstance().isHdGraphics()) {
++			HdSetup.prepare(settlersFolders.gfxFolder);
++		}
++
+ 		// setup image and sound provider
+ 		ImageProvider.setLookupPath(settlersFolders.gfxFolder, settlersVersionId);
+ 		SoundManager.setLookupPath(settlersFolders.sndFolder);
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/SettingsManager.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/SettingsManager.java
+index edfaf0158..792a0b955 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/SettingsManager.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/SettingsManager.java
+@@ -52,6 +52,7 @@ public class SettingsManager implements ISoundSettingsProvider {
+ 
+ 	private static final String SETTING_USERNAME = "name";
+ 	private static final String SETTING_LOCALE = "locale";
++	private static final String SETTING_HD_GRAPHICS = "hd-graphics";
+ 	private static final String SETTING_VOLUME = "volume";
+ 	private static final String SETTING_VOLUME_MUSIC = "volume-music";
+ 	private static final String SETTING_MUSIC_PLAYALL = "music-playall";
+@@ -227,6 +228,17 @@ public class SettingsManager implements ISoundSettingsProvider {
+ 				.map(s -> ECivilisation.valueOf(s.toUpperCase()));
+ 	}
+ 
++	/**
++	 * Gets if the HD graphics (enlarged images of the original graphics) are used. Off unless it was switched on in the settings menu.
++	 */
++	public boolean isHdGraphics() {
++		return Optional.ofNullable(get(SETTING_HD_GRAPHICS)).map(Boolean::parseBoolean).orElse(false);
++	}
++
++	public void setHdGraphics(boolean hdGraphics) {
++		set(SETTING_HD_GRAPHICS, Boolean.toString(hdGraphics));
++	}
++
+ 	public boolean getAiTowerFocus() {
+ 		return Optional.ofNullable(get(SETTING_AI_TOWER_FOCUS))
+ 				.map(Boolean::parseBoolean)
+PATCH_EOF
+cat > "$WORK/patches/18-smithy-output.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+index 0eb7c83a2..5dab815c0 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+@@ -20,6 +20,7 @@ import java.util.Optional;
+ import go.graphics.GLDrawContext;
+ import go.graphics.text.EFontSize;
+ import jsettlers.common.buildings.BuildingVariant;
++import jsettlers.common.buildings.EBuildingType;
+ import jsettlers.common.buildings.IBuilding;
+ import jsettlers.common.images.EImageLinkType;
+ import jsettlers.common.images.ImageLink;
+@@ -400,21 +401,52 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+ 		}
+ 	}
+ 
++	private static final int SMITHY_BUTTONS_PER_ROW = 5;
++	/** Gap between two rows of material buttons, relative to the height of one row (3 of 29 pixels). */
++	private static final float SMITHY_ROW_GAP = 3f / 29;
++
+ 	private void addRequestAndOfferStacks(UIPanel materialArea, BuildingState state) {
+ 		// hardcoded...
+ 		float buttonWidth = 18f / (127 - 9);
+ 		float buttonSpace = 12f / (127 - 9);
+ 
++		List<StackState> stacks = state.getStackStates();
++
++		// The tool and weapon smithies can have many different products lying at the building. Up to 5 buttons stay in one row (with a smaller
++		// gap if needed). With more, the first row moves up and the rest is placed in rows below it, the last row at the original position.
++		boolean smithy = building.getBuildingVariant().getType() == EBuildingType.TOOLSMITH
++				|| building.getBuildingVariant().getType() == EBuildingType.WEAPONSMITH;
++		int perRow = Integer.MAX_VALUE;
++		if (smithy) {
++			perRow = SMITHY_BUTTONS_PER_ROW;
++			if (stacks.size() > 3) {
++				int inRow = Math.min(stacks.size(), perRow);
++				buttonSpace = (1 - inRow * buttonWidth) / (inRow + 1);
++			}
++		}
++		int rows = Math.max(1, (stacks.size() + perRow - 1) / perRow);
++		float rowStep = 1 + SMITHY_ROW_GAP;
++
+ 		float requestX = buttonSpace;
+ 		float offerX = 1 - buttonSpace - buttonWidth;
++		int index = 0;
++		for (StackState mat : stacks) {
++			int row = index / perRow;
++			if (index % perRow == 0) {
++				requestX = buttonSpace;
++				offerX = 1 - buttonSpace - buttonWidth;
++			}
++			index++;
++
++			float bottom = (rows - 1 - row) * rowStep;
++			float top = bottom + 1;
+ 
+-		for (StackState mat : state.getStackStates()) {
+ 			MaterialDisplay display = new MaterialDisplay(mat);
+ 			if (mat.isOffering()) {
+-				materialArea.addChild(display, offerX, 0, offerX + buttonWidth, 1);
++				materialArea.addChild(display, offerX, bottom, offerX + buttonWidth, top);
+ 				offerX -= buttonSpace + buttonWidth;
+ 			} else {
+-				materialArea.addChild(display, requestX, 0, requestX + buttonWidth, 1);
++				materialArea.addChild(display, requestX, bottom, requestX + buttonWidth, top);
+ 				requestX += buttonSpace + buttonWidth;
+ 			}
+ 		}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java
+index 721e41d6a..7cd1c5b98 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java
+@@ -35,6 +35,7 @@ import jsettlers.common.buildings.stacks.ConstructionStack;
+ import jsettlers.common.buildings.stacks.RelativeStack;
+ import jsettlers.common.map.shapes.FreeMapArea;
+ import jsettlers.common.mapobject.EMapObjectType;
++import jsettlers.common.material.EMaterialType;
+ import jsettlers.common.material.EPriority;
+ import jsettlers.common.movable.EDirection;
+ import jsettlers.common.player.IPlayerable;
+@@ -670,11 +671,41 @@ public abstract class Building extends AbstractHexMapObject implements IConstruc
+ 				byte stackSize = grid.getRequestStackGrid().getStackSize(offerStack.calculatePoint(pos), offerStack.getMaterialType());
+ 				materials.add(new BuildingMaterial(offerStack.getMaterialType(), stackSize, true));
+ 			}
++
++			addSmithyOutput(materials);
+ 		}
+ 
+ 		return materials;
+ 	}
+ 
++	/**
++	 * The tool and weapon smithies have no fixed offer stacks, they drop whatever they produced at one position. Show every kind that currently lies
++	 * there so the player can see what has to be carried away.
++	 */
++	private void addSmithyOutput(List<IBuildingMaterial> materials) {
++		Collection<EMaterialType> products;
++		if (type == EBuildingType.TOOLSMITH) {
++			products = EMaterialType.TOOLS;
++		} else if (type == EBuildingType.WEAPONSMITH) {
++			products = EMaterialType.WEAPONS;
++		} else {
++			return;
++		}
++
++		RelativePoint dropPosition = getBuildingVariant().getSmithDropPosition();
++		if (dropPosition == null) {
++			return;
++		}
++		ShortPoint2D dropPoint = dropPosition.calculatePoint(pos);
++
++		for (EMaterialType product : products) {
++			byte stackSize = grid.getRequestStackGrid().getStackSize(dropPoint, product);
++			if (stackSize > 0) {
++				materials.add(new BuildingMaterial(product, stackSize, true));
++			}
++		}
++	}
++
+ 	public void setPriority(EPriority newPriority) {
+ 		this.priority = newPriority;
+ 		if (stacks != null) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+index 10294909a..fd332444d 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+@@ -448,9 +448,13 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 				continue; // skip inactive requests and requests not needing a tool production
+ 			}
+ 
++			EMaterialType tool = request.requestedMovableType().getTool();
++			if (materialOffers.getOfferCloseTo(tool, EOfferPriority.LOWEST, request.getPosition()) != null) {
++				continue; // this tool has already been produced and only waits to be picked up, do not produce more of it
++			}
++
+ 			request.setToolProductionRequired(false); // FIXME @andreas-eberle: Investigate if this is correct! And why it doesn't break the system
+ 
+-			EMaterialType tool = request.requestedMovableType().getTool();
+ 			byte prio = priorityForTool[tool.ordinal];
+ 
+ 			if (prio > bestPrio) {
+PATCH_EOF
+cat > "$WORK/patches/19-auto-work-area.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.common/src/main/resources/jsettlers/common/buildings/amazon/beekeeping.xml b/jsettlers.common/src/main/resources/jsettlers/common/buildings/amazon/beekeeping.xml
+index 6ad1b8cac..25bf56e55 100644
+--- a/jsettlers.common/src/main/resources/jsettlers/common/buildings/amazon/beekeeping.xml
++++ b/jsettlers.common/src/main/resources/jsettlers/common/buildings/amazon/beekeeping.xml
+@@ -1,6 +1,6 @@
+ <?xml version="1.0" encoding="UTF-8"?>
+ <!DOCTYPE building SYSTEM "../building.dtd" >
+-<building worker="BEEKEEPER" workradius="10">
++<building worker="BEEKEEPER" workradius="20">
+ 	<ground groundtype="GRASS" />
+ 	<ground groundtype="EARTH" />
+ 	<ground groundtype="FLATTENED" />
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java
+index d7e8a6f9c..424a393ae 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IWorkerRequestBuilding.java
+@@ -42,6 +42,11 @@ public interface IWorkerRequestBuilding extends IPlayerable, ILocatable, IBuildi
+ 
+ 	ShortPoint2D getWorkAreaCenter();
+ 
++	/**
++	 * Moves the work area. Used by workers to follow the work automatically if nothing is left to do in the current area.
++	 */
++	void setWorkAreaCenter(ShortPoint2D newWorkAreaCenter);
++
+ 	void occupyBuilding(IManageableWorker worker);
+ 
+ 	BuildingVariant getBuildingVariant();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java
+index 1d83319e6..9ab37f238 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java
+@@ -5,6 +5,8 @@ import jsettlers.algorithms.simplebehaviortree.IEMaterialTypeSupplier;
+ import jsettlers.algorithms.simplebehaviortree.IShortSupplier;
+ import jsettlers.algorithms.simplebehaviortree.Node;
+ import jsettlers.algorithms.simplebehaviortree.nodes.Guard;
++import jsettlers.algorithms.path.Path;
++import jsettlers.common.buildings.BuildingVariant;
+ import jsettlers.common.buildings.EBuildingType;
+ import jsettlers.common.buildings.IBuilding;
+ import jsettlers.common.buildings.stacks.RelativeStack;
+@@ -28,6 +30,8 @@ import jsettlers.logic.player.Player;
+ import java.io.FileOutputStream;
+ import java.io.IOException;
+ import java.io.PrintStream;
++import java.util.ArrayList;
++import java.util.List;
+ import java.util.function.Supplier;
+ 
+ import static jsettlers.algorithms.simplebehaviortree.BehaviorTreeHelper.*;
+@@ -39,6 +43,10 @@ public class BuildingWorkerMovable extends CivilianMovable implements IBuildingW
+ 	protected IWorkerRequestBuilding building;
+ 	private boolean registered = false;
+ 	protected int searchFailedCtr = 0;
++	/** Work area centers used before the current one. Ripe crops that were planted there are still harvested. */
++	private final List<ShortPoint2D> formerWorkAreaCenters = new ArrayList<>();
++	private ShortPoint2D lastWorkAreaCenter = null;
++	private static final int MAX_FORMER_WORK_AREA_CENTERS = 4;
+ 
+ 	public BuildingWorkerMovable(AbstractMovableGrid grid, EMovableType movableType, ShortPoint2D position, Player player, Movable replace) {
+ 		super(grid, movableType, position, player, replace);
+@@ -279,12 +287,64 @@ public class BuildingWorkerMovable extends CivilianMovable implements IBuildingW
+ 	protected static <T extends BuildingWorkerMovable> Node<T> preSearchPathNoWarning(boolean dijkstra, ESearchType searchType) {
+ 		return BehaviorTreeHelper.condition(mov -> {
+ 			ShortPoint2D workAreaCenter = mov.building.getWorkAreaCenter();
++			mov.rememberWorkAreaCenter(workAreaCenter);
+ 
+-			return mov.preSearchPath(dijkstra, workAreaCenter.x, workAreaCenter.y, mov.building.getBuildingVariant().getWorkRadius(),
++			boolean found = mov.preSearchPath(dijkstra, workAreaCenter.x, workAreaCenter.y, mov.building.getBuildingVariant().getWorkRadius(),
+ 					searchType);
++			if (found) { // there is work (e.g. planting), so there is no reason to complain
++				mov.searchFailedCtr = 0;
++				mov.building.setCannotWork(false);
++			}
++			return found;
+ 		});
+ 	}
+ 
++	protected void rememberWorkAreaCenter(ShortPoint2D center) {
++		if (lastWorkAreaCenter != null && !lastWorkAreaCenter.equals(center)) {
++			formerWorkAreaCenters.remove(lastWorkAreaCenter);
++			formerWorkAreaCenters.add(lastWorkAreaCenter);
++			if (formerWorkAreaCenters.size() > MAX_FORMER_WORK_AREA_CENTERS) {
++				formerWorkAreaCenters.remove(0);
++			}
++		}
++		lastWorkAreaCenter = center;
++	}
++
++	/**
++	 * Like {@link #preSearchPath}, but for harvesting: if there is nothing ripe in the current work area, the former work areas and the default work
++	 * area are searched too. So crops that were planted before the work area was moved are harvested first, instead of rotting away.
++	 */
++	protected static <T extends BuildingWorkerMovable> Node<T> preSearchHarvestPath(ESearchType searchType) {
++		return selector(
++				preSearchPathNoWarning(true, searchType),
++				condition(mov -> {
++					if (mov.preSearchHarvestElsewhere(searchType)) {
++						mov.searchFailedCtr = 0;
++						mov.building.setCannotWork(false);
++						return true;
++					}
++					return false;
++				}),
++				preSearchPath(true, searchType) // nothing to harvest at all: usual handling of failed searches
++		);
++	}
++
++	protected boolean preSearchHarvestElsewhere(ESearchType searchType) {
++		short radius = building.getBuildingVariant().getWorkRadius();
++		ShortPoint2D current = building.getWorkAreaCenter();
++		List<ShortPoint2D> bases = new ArrayList<>(formerWorkAreaCenters);
++		bases.add(building.getBuildingVariant().getDefaultWorkcenter().calculatePoint(building.getPosition()));
++		for (ShortPoint2D base : bases) {
++			if (base.equals(current) || !isInGrid(base)) {
++				continue;
++			}
++			if (preSearchPath(true, base.x, base.y, radius, searchType)) {
++				return true;
++			}
++		}
++		return false;
++	}
++
+ 	protected static <T extends BuildingWorkerMovable> Node<T> preSearchPath(boolean dijkstra, ESearchType searchType) {
+ 		return selector(
+ 				sequence(
+@@ -298,7 +358,10 @@ public class BuildingWorkerMovable extends CivilianMovable implements IBuildingW
+ 					action(mov -> {
+ 						mov.searchFailedCtr++;
+ 
+-						if (mov.searchFailedCtr > 10) {
++						if (mov.isTimeToMoveWorkArea() && mov.moveWorkAreaToWork(searchType, true)) {
++							mov.searchFailedCtr = 0;
++							mov.building.setCannotWork(false);
++						} else if (mov.searchFailedCtr > 10) {
+ 							mov.building.setCannotWork(true);
+ 							mov.player.showMessage(SimpleMessage.cannotFindWork(mov.building));
+ 						}
+@@ -308,6 +371,146 @@ public class BuildingWorkerMovable extends CivilianMovable implements IBuildingW
+ 		);
+ 	}
+ 
++	// ---- Automatic work area: if there is nothing to do in the current work area, the building looks for work nearby and moves its work area.
++
++	/** The first automatic attempt is made after this many failed searches (before the "cannot find work" message would appear). */
++	private static final int AUTO_AREA_FIRST_TRY = 2;
++	/** After that, another attempt is made after this many failed searches (about 2 seconds). */
++	private static final int AUTO_AREA_RETRY_PERIOD = 34;
++
++	protected boolean isTimeToMoveWorkArea() {
++		return searchFailedCtr >= AUTO_AREA_FIRST_TRY && (searchFailedCtr - AUTO_AREA_FIRST_TRY) % AUTO_AREA_RETRY_PERIOD == 0;
++	}
++
++	/**
++	 * A node that moves the work area to a place where there is work for the given search types (tried in the given order).
++	 */
++	protected static <T extends BuildingWorkerMovable> Node<T> autoWorkArea(ESearchType... searchTypes) {
++		return action(mov -> {
++			for (ESearchType searchType : searchTypes) {
++				if (mov.moveWorkAreaToWork(searchType, false)) {
++					mov.searchFailedCtr = 0;
++					mov.building.setCannotWork(false);
++					return;
++				}
++			}
++		});
++	}
++
++	/**
++	 * Looks for work of the given type outside of the current work area and moves the work area there.
++	 * <ul>
++	 * <li>Trees, stones, fish, rivers (big areas): the area follows the nearest work within twice the work radius of the current center or the default
++	 * center, but not further than three times the work radius from the building.</li>
++	 * <li>Tree planting: like above, but with a smaller range.</li>
++	 * <li>Rice: the area follows the nearest swamp that can be planted or harvested within three times the work radius.</li>
++	 * <li>Bees: like rice, the area follows the nearest place for a hive (grass next to a tree) within twice the work radius.</li>
++	 * <li>Corn and wine (they work around the building): the area returns to the default center if there is work, otherwise it moves a bit to the
++	 * side, up to twice the work radius from the default center.</li>
++	 * </ul>
++	 *
++	 * @param searchType
++	 * 		The type of work.
++	 * @param onlyBigAreas
++	 * 		If true, only the types that do not have a separate "nothing to do" fallback in their behaviour are handled.
++	 * @return true if the work area was moved.
++	 */
++	protected boolean moveWorkAreaToWork(ESearchType searchType, boolean onlyBigAreas) {
++		BuildingVariant variant = building.getBuildingVariant();
++		short radius = variant.getWorkRadius();
++		if (radius <= 0) {
++			return false;
++		}
++
++		ShortPoint2D buildingPos = building.getPosition();
++		ShortPoint2D current = building.getWorkAreaCenter();
++		ShortPoint2D home = variant.getDefaultWorkcenter().calculatePoint(buildingPos);
++		if (current == null) {
++			return false;
++		}
++
++		int searchRadius;
++		int maxDistance;
++		boolean homeFirst = false;
++		ShortPoint2D limitCenter = buildingPos; // maxDistance is measured from here
++		switch (searchType) {
++		case CUTTABLE_TREE:
++		case CUTTABLE_STONE:
++		case FISHABLE:
++		case RIVER:
++			searchRadius = 2 * radius;
++			maxDistance = 3 * radius;
++			break;
++		case PLANTABLE_TREE:
++			searchRadius = (3 * radius) / 2;
++			maxDistance = 2 * radius;
++			break;
++		case PLANTABLE_RICE:
++		case HARVESTABLE_RICE:
++			if (onlyBigAreas) {
++				return false;
++			}
++			searchRadius = 3 * radius;
++			maxDistance = 3 * radius;
++			break;
++		case PLANTABLE_HIVE:
++		case HARVESTABLE_HIVE:
++			// hives need grass next to a tree, so the beekeeper follows the nearest suitable place
++			if (onlyBigAreas) {
++				return false;
++			}
++			searchRadius = 2 * radius;
++			maxDistance = 2 * radius;
++			break;
++		case CUTTABLE_CORN:
++		case PLANTABLE_CORN:
++		case HARVESTABLE_WINE:
++		case PLANTABLE_WINE:
++			// work around the building: go back to the default center if there is something to do there, otherwise move the area a bit
++			// to the side (e.g. if the default area is blocked by a building)
++			if (onlyBigAreas) {
++				return false;
++			}
++			homeFirst = true;
++			limitCenter = home;
++			searchRadius = 2 * radius;
++			maxDistance = 2 * radius; // measured from the default center, because that is already some way from the building
++			break;
++		default:
++			return false;
++		}
++
++		if (homeFirst && !current.equals(home) && isInGrid(home) && grid.searchDijkstra(this, home.x, home.y, radius, searchType) != null) {
++			building.setWorkAreaCenter(home);
++			if (building.getWorkAreaCenter().equals(home)) {
++				return true;
++			}
++		}
++
++		ShortPoint2D[] bases = current.equals(home) ? new ShortPoint2D[] { current } : new ShortPoint2D[] { current, home };
++		for (ShortPoint2D base : bases) {
++			if (!isInGrid(base)) {
++				continue;
++			}
++			Path path = grid.searchDijkstra(this, base.x, base.y, (short) searchRadius, searchType);
++			if (path == null) {
++				continue;
++			}
++			ShortPoint2D target = path.getTargetPosition();
++			if (!target.equals(current) && limitCenter.getOnGridDistTo(target) <= maxDistance) {
++				building.setWorkAreaCenter(target);
++				if (building.getWorkAreaCenter().equals(target)) {
++					return true;
++				}
++			}
++		}
++		return false;
++	}
++
++	private boolean isInGrid(ShortPoint2D point) {
++		return point.x >= 0 && point.y >= 0 && point.x < grid.getWidth() && point.y < grid.getHeight();
++	}
++
+ 	protected boolean tryTakingResource() {
+ 		if(building.getBuildingVariant().isVariantOf(EBuildingType.FISHER)) {
+ 			EDirection fishDirection = getDirection();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java
+index f69e1c4b1..45f79d30f 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java
+@@ -242,7 +242,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 						selector(
+ 							sequence(
+ 								outputStackNotFull(EMaterialType.WINE),
+-								preSearchPath(true, ESearchType.HARVESTABLE_WINE),
++								preSearchHarvestPath(ESearchType.HARVESTABLE_WINE),
+ 								ignoreFailure(
+ 									sequence(
+ 										setMaterialNode(EMaterialType.BASKET),
+@@ -284,6 +284,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 								)
+ 							),
+ 							sequence(
++								autoWorkArea(ESearchType.HARVESTABLE_WINE, ESearchType.PLANTABLE_WINE),
+ 								sleep(1000),
+ 								alwaysFail()
+ 							)
+@@ -303,7 +304,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 						selector(
+ 							sequence(
+ 								outputStackNotFull(EMaterialType.CROP),
+-								preSearchPath(true, ESearchType.CUTTABLE_CORN),
++								preSearchHarvestPath(ESearchType.CUTTABLE_CORN),
+ 								ignoreFailure(
+ 									sequence(
+ 										show(),
+@@ -360,6 +361,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 								)
+ 							),
+ 							sequence(
++								autoWorkArea(ESearchType.CUTTABLE_CORN, ESearchType.PLANTABLE_CORN),
+ 								sleep(1000),
+ 								alwaysFail()
+ 							)
+@@ -573,7 +575,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 						selector(
+ 							sequence(
+ 								outputStackNotFull(EMaterialType.RICE),
+-								preSearchPath(true, ESearchType.HARVESTABLE_RICE),
++								preSearchHarvestPath(ESearchType.HARVESTABLE_RICE),
+ 								ignoreFailure(
+ 									sequence(
+ 										condition(mov -> true),
+@@ -611,6 +613,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 								)
+ 							),
+ 							sequence(
++								autoWorkArea(ESearchType.PLANTABLE_RICE, ESearchType.HARVESTABLE_RICE),
+ 								sleep(1000),
+ 								alwaysFail()
+ 							)
+@@ -630,7 +633,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 						selector(
+ 							sequence(
+ 								outputStackNotFull(EMaterialType.HONEY),
+-								preSearchPath(true, ESearchType.HARVESTABLE_HIVE),
++								preSearchHarvestPath(ESearchType.HARVESTABLE_HIVE),
+ 								ignoreFailure(
+ 									sequence(
+ 										show(),
+@@ -670,6 +673,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 								)
+ 							),
+ 							sequence(
++								autoWorkArea(ESearchType.HARVESTABLE_HIVE, ESearchType.PLANTABLE_HIVE),
+ 								sleep(1000),
+ 								alwaysFail()
+ 							)
+PATCH_EOF
+cat > "$WORK/patches/20-convert-specialists-to-bearers.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/SpecialistSelectionContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/SpecialistSelectionContent.java
+index 6b8491905..9be91a0d8 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/SpecialistSelectionContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/SpecialistSelectionContent.java
+@@ -50,7 +50,9 @@ public class SpecialistSelectionContent extends AbstractSelectionContent {
+ 		panel.addChild(stop, .1f, .1f, .5f, .2f);
+ 		panel.addChild(work, .5f, .1f, .9f, .2f);
+ 
+-		if (selection.getMovableCount(EMovableType.PIONEER, null) > 0) {
++		if (selection.getMovableCount(EMovableType.PIONEER, null) > 0
++				|| selection.getMovableCount(EMovableType.THIEF, null) > 0
++				|| selection.getMovableCount(EMovableType.GEOLOGIST, null) > 0) {
+ 			UIPanel convert = new LabeledButton(Labels.getString("convert_all_to_BEARER"),
+ 					new ConvertAction(EMovableType.BEARER,
+ 							Short.MAX_VALUE));
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/ui/LabeledButton.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/ui/LabeledButton.java
+index 59a721d5f..0cdeccd73 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/ui/LabeledButton.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/ui/LabeledButton.java
+@@ -37,6 +37,9 @@ public class LabeledButton extends Button {
+ 	private static final OriginalImageLink BUTTON_ACTIVE = new OriginalImageLink(
+ 			EImageLinkType.GUI, 3, 327, 0);
+ 
++	/** The part of the button width that the text may use. */
++	private static final float MAX_TEXT_WIDTH = 0.92f;
++
+ 	private final EFontSize size;
+ 	private boolean enabled = true;
+ 
+@@ -55,8 +58,14 @@ public class LabeledButton extends Button {
+ 	public void drawAt(GLDrawContext gl) {
+ 		super.drawAt(gl);
+ 
++		String label = getText();
+ 		TextDrawer drawer = gl.getTextDrawer(size);
+-		drawer.renderCentered(getPosition().getCenterX(), getPosition().getCenterY(), getText());
++		float maxWidth = getPosition().getWidth() * MAX_TEXT_WIDTH;
++		if (size != EFontSize.SMALL && drawer.getWidth(label) > maxWidth) {
++			// the text does not fit on the button (long translations), use the smaller font
++			drawer = gl.getTextDrawer(EFontSize.SMALL);
++		}
++		drawer.renderCentered(getPosition().getCenterX(), getPosition().getCenterY(), label);
+ 	}
+ 
+ 	protected String getText() {
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index 263bb2cbb..ba7c4b285 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -329,13 +329,13 @@ kill = Zabít
+ work = Pracovat zde
+ unload = Vyložit trajekty
+ convert_1_to_GEOLOGIST = Jeden nový geolog
+-convert_all_to_GEOLOGIST = Přeměnit vybrané na geology
++convert_all_to_GEOLOGIST = Vybrané na geology
+ convert_1_to_THIEF = Jeden nový zloděj
+-convert_all_to_THIEF = Přeměnit vybrané na zloděje
++convert_all_to_THIEF = Vybrané na zloděje
+ convert_1_to_PIONEER = Jeden nový pionýr
+-convert_all_to_PIONEER = Přeměnit vybrané na pionýry
++convert_all_to_PIONEER = Vybrané na pionýry
+ convert_1_to_BEARER = Jeden nový nosič
+-convert_all_to_BEARER = Přeměnit vybrané na nosiče
++convert_all_to_BEARER = Vybrané na nosiče
+ 
+ 
+ # stock gui labels
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 82b004014..e63454ac7 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -335,13 +335,13 @@ kill = Kill
+ work = Work here
+ unload = Unload ferries
+ convert_1_to_GEOLOGIST = One new geologist
+-convert_all_to_GEOLOGIST = Convert selected to geologists
++convert_all_to_GEOLOGIST = Selected to geologists
+ convert_1_to_THIEF = One new thief
+-convert_all_to_THIEF = Convert selected to thieves
++convert_all_to_THIEF = Selected to thieves
+ convert_1_to_PIONEER = One new pioneer
+-convert_all_to_PIONEER = Convert selected to pioneers
++convert_all_to_PIONEER = Selected to pioneers
+ convert_1_to_BEARER = One new carrier
+-convert_all_to_BEARER = Convert selected to carriers
++convert_all_to_BEARER = Selected to carriers
+ 
+ 
+ # stock gui labels
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+index de0f73715..3e830ba33 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+@@ -543,7 +543,7 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 				for (final ISelectable curr : currentSelection) {
+ 					if (curr instanceof IGraphicsMovable) {
+ 						final EMovableType currType = ((IGraphicsMovable) curr).getMovableType();
+-						if (currType == EMovableType.PIONEER) {
++						if (currType == EMovableType.PIONEER || currType == EMovableType.THIEF || currType == EMovableType.GEOLOGIST) {
+ 							convertables.add(curr);
+ 							if (convertables.size() >= action.getAmount()) {
+ 								break;
+@@ -840,6 +840,27 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 		updateSelection(SelectionSet::createFromFilteredSelectionSetUpdatingType);
+ 	}
+ 
++	@Override
++	public void renewSelection(List<? extends ISelectable> additional) {
++		if (currentSelection.isEmpty() || additional.isEmpty()) {
++			renewSelection();
++			return;
++		}
++
++		Predicate<ISelectable> stillSelected = selectable -> selectable.isSelected() && canSelectPlayer(selectable.getPlayer());
++		List<ISelectable> all = new ArrayList<>();
++		currentSelection.stream().filter(stillSelected).forEach(all::add);
++		additional.stream().filter(stillSelected).filter(selectable -> !all.contains(selectable)).forEach(all::add);
++
++		SelectionSet newSelection = new SelectionSet(all);
++		for (ISelectable selectable : additional) {
++			if (!newSelection.contains(selectable)) {
++				selectable.setSelected(false); // could not be added to the new selection
++			}
++		}
++		setSelection(newSelection);
++	}
++
+ 	private void updateSelection(BiFunction<SelectionSet, Predicate<ISelectable>, SelectionSet> updateFunction) {
+ 		if (!currentSelection.isEmpty()) {
+ 			SelectionSet newSelection = updateFunction.apply(currentSelection, selectable -> selectable.isSelected() && canSelectPlayer(selectable.getPlayer()));
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+index fa7cd74c5..27be3242d 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+@@ -16,6 +16,7 @@ package jsettlers.input;
+ 
+ import java.io.IOException;
+ import java.util.Iterator;
++import java.util.ArrayList;
+ import java.util.List;
+ 
+ import java.util.Objects;
+@@ -29,6 +30,7 @@ import jsettlers.common.buildings.IBuilding;
+ import jsettlers.common.map.shapes.HexGridArea;
+ import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.position.ShortPoint2D;
++import jsettlers.common.selectable.ISelectable;
+ import jsettlers.common.utils.mutables.MutableInt;
+ import jsettlers.input.tasks.CastSpellGuiTask;
+ import jsettlers.input.tasks.ChangeTowerSoldiersGuiTask;
+@@ -69,7 +71,7 @@ import jsettlers.logic.movable.interfaces.IBearerMovable;
+ import jsettlers.logic.movable.interfaces.IFerryMovable;
+ import jsettlers.logic.movable.interfaces.ILogicMovable;
+ import jsettlers.logic.movable.interfaces.IMageMovable;
+-import jsettlers.logic.movable.interfaces.IPioneerMovable;
++import jsettlers.logic.movable.interfaces.IConvertibleToBearer;
+ import jsettlers.network.client.task.packets.TaskPacket;
+ import jsettlers.network.synchronic.timer.ITaskExecutor;
+ 
+@@ -313,8 +315,10 @@ class GuiTaskExecutor implements ITaskExecutor {
+ 	}
+ 
+ 	private void convertMovables(ConvertGuiTask guiTask) {
++		List<ISelectable> convertedSelected = new ArrayList<>();
+ 		for (Integer currID : guiTask.getSelection()) {
+ 			ILogicMovable movable = MovableManager.getMovableByID(currID);
++			boolean wasSelected = movable != null && movable.isSelected();
+ 			switch(guiTask.getTargetType()) {
+ 				case GEOLOGIST:
+ 				case PIONEER:
+@@ -324,15 +328,23 @@ class GuiTaskExecutor implements ITaskExecutor {
+ 					}
+ 					break;
+ 				case BEARER:
+-					if(movable instanceof IPioneerMovable) {
+-						((IPioneerMovable)movable).convertToBearer();
++					if(movable instanceof IConvertibleToBearer) {
++						((IConvertibleToBearer)movable).convertToBearer();
+ 					}
+ 					break;
+ 				default:
+ 					System.err.println("Illegal conversion from " + movable.getMovableType() + " to " + guiTask.getTargetType());
+ 			}
++
++			if (wasSelected && movable instanceof Movable) { // the new movables stay selected
++				Movable replacement = ((Movable) movable).getReplacement();
++				if (replacement != null) {
++					replacement.setSelected(true);
++					convertedSelected.add(replacement);
++				}
++			}
+ 		}
+-		guiInterface.renewSelection();
++		guiInterface.renewSelection(convertedSelected);
+ 	}
+ 
+ 	private void stopOrStartWorking(List<Integer> selectedMovables, boolean stop) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/ITaskExecutorGuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/ITaskExecutorGuiInterface.java
+index 9bb51635a..90529e6c6 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/ITaskExecutorGuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/ITaskExecutorGuiInterface.java
+@@ -14,7 +14,10 @@
+  *******************************************************************************/
+ package jsettlers.input;
+ 
++import java.util.List;
++
+ import jsettlers.common.menu.UIState;
++import jsettlers.common.selectable.ISelectable;
+ 
+ /**
+  * Interface for TaskExecutor to give commands to the GuiInterface using the executor.
+@@ -29,6 +32,14 @@ public interface ITaskExecutorGuiInterface {
+ 	 */
+ 	void renewSelection();
+ 
++	/**
++	 * Renews the current selection and adds the given movables to it. This is used after movables have been converted: the new movables stay selected.
++	 *
++	 * @param additional
++	 * 		The new movables that have to be part of the selection.
++	 */
++	void renewSelection(List<? extends ISelectable> additional);
++
+ 	/**
+ 	 * 
+ 	 * @return Returns the current {@link UIState} that can be used to save it with a savegame.
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/Movable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/Movable.java
+index 79ecf5316..e16706af5 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/Movable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/Movable.java
+@@ -115,6 +115,8 @@ public abstract class Movable implements ILogicMovable, FoWTask {
+ 	protected int     flockDelay  = 700;
+ 
+ 	private transient boolean selected    = false;
++	/** The movable that replaced this one (e.g. a bearer that was converted to a geologist), or null. */
++	private transient Movable replacedBy = null;
+ 	private transient boolean soundPlayed = false;
+ 
+ 	protected boolean playerControlled;
+@@ -895,6 +897,13 @@ public abstract class Movable implements ILogicMovable, FoWTask {
+ 		this.selected = selected;
+ 	}
+ 
++	/**
++	 * @return The movable that took the place of this one when it was converted, or null if it has not been replaced.
++	 */
++	public final Movable getReplacement() {
++		return replacedBy;
++	}
++
+ 	@Override
+ 	public void stopOrStartWorking(boolean stop) {
+ 	}
+@@ -1028,7 +1037,10 @@ public abstract class Movable implements ILogicMovable, FoWTask {
+ 		MovableManager.add(movable);
+ 		grid.enterPosition(position, movable, true);
+ 
+-		if(replaceMovable != null) replaceMovable.killMovable();
++		if(replaceMovable != null) {
++			replaceMovable.replacedBy = movable;
++			replaceMovable.killMovable();
++		}
+ 		return movable;
+ 	}
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/interfaces/IConvertibleToBearer.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/interfaces/IConvertibleToBearer.java
+new file mode 100644
+index 000000000..dbfc8744f
+--- /dev/null
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/interfaces/IConvertibleToBearer.java
+@@ -0,0 +1,14 @@
++package jsettlers.logic.movable.interfaces;
++
++/**
++ * A movable that can be turned back into a normal carrier by the player (pioneers, thieves and geologists).
++ */
++public interface IConvertibleToBearer {
++
++	/**
++	 * Replaces this movable by a bearer. This only works on the ground of the owner.
++	 *
++	 * @return true if the movable has been converted.
++	 */
++	boolean convertToBearer();
++}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/interfaces/IPioneerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/interfaces/IPioneerMovable.java
+index f2f650a7d..d8b879879 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/interfaces/IPioneerMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/interfaces/IPioneerMovable.java
+@@ -1,6 +1,6 @@
+ package jsettlers.logic.movable.interfaces;
+ 
+-public interface IPioneerMovable extends IAttackableHumanMovable {
++public interface IPioneerMovable extends IAttackableHumanMovable, IConvertibleToBearer {
+ 
+ 	boolean convertToBearer();
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/GeologistMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/GeologistMovable.java
+index 1e2f65959..defd2ebeb 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/GeologistMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/GeologistMovable.java
+@@ -14,11 +14,12 @@ import jsettlers.logic.movable.MovableManager;
+ import jsettlers.logic.movable.other.AttackableHumanMovable;
+ import jsettlers.logic.movable.Movable;
+ import jsettlers.logic.movable.interfaces.AbstractMovableGrid;
++import jsettlers.logic.movable.interfaces.IConvertibleToBearer;
+ import jsettlers.logic.player.Player;
+ 
+ import static jsettlers.algorithms.simplebehaviortree.BehaviorTreeHelper.*;
+ 
+-public class GeologistMovable extends AttackableHumanMovable {
++public class GeologistMovable extends AttackableHumanMovable implements IConvertibleToBearer {
+ 
+ 	private static final long serialVersionUID = 1L;
+ 
+@@ -37,6 +38,15 @@ public class GeologistMovable extends AttackableHumanMovable {
+ 		MovableManager.registerBehaviour(EMovableType.GEOLOGIST, new Root<>(createGeologistBehaviour()));
+ 	}
+ 
++	@Override
++	public boolean convertToBearer() {
++		if (!player.equals(grid.getPlayerAt(position))) return false;
++
++		createMovable(EMovableType.BEARER, player, position, grid, this);
++
++		return true;
++	}
++
+ 	public static Node<GeologistMovable> createGeologistBehaviour() {
+ 		return guardSelector(
+ 				handleFrozenEffect(),
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java
+index 952cc6dcf..840421a41 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java
+@@ -16,11 +16,12 @@ import jsettlers.logic.movable.MovableManager;
+ import jsettlers.logic.movable.other.AttackableHumanMovable;
+ import jsettlers.logic.movable.Movable;
+ import jsettlers.logic.movable.interfaces.AbstractMovableGrid;
++import jsettlers.logic.movable.interfaces.IConvertibleToBearer;
+ import jsettlers.logic.player.Player;
+ 
+ import static jsettlers.algorithms.simplebehaviortree.BehaviorTreeHelper.*;
+ 
+-public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThief {
++public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThief, IConvertibleToBearer {
+ 
+ 	private static final long serialVersionUID = 1;
+ 
+@@ -122,7 +123,9 @@ public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThi
+ 
+ 	private void dropMaterialIfPossible() {
+ 		EMaterialType stolenMaterial = setMaterial(EMaterialType.NO_MATERIAL);
+-		grid.dropMaterial(position, stolenMaterial, true, true);
++		if (stolenMaterial != EMaterialType.NO_MATERIAL) { // otherwise a log of wood (material 0) would appear
++			grid.dropMaterial(position, stolenMaterial, true, true);
++		}
+ 	}
+ 
+ 	protected static Node<ThiefMovable> stealMaterial() {
+@@ -158,6 +161,15 @@ public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThi
+ 		uncoveredBy.clear();
+ 	}
+ 
++	@Override
++	public boolean convertToBearer() {
++		if (!player.equals(grid.getPlayerAt(position))) return false;
++
++		createMovable(EMovableType.BEARER, player, position, grid, this);
++
++		return true;
++	}
++
+ 	@Override
+ 	protected void decoupleMovable() {
+ 		super.decoupleMovable();
+PATCH_EOF
+cat > "$WORK/patches/21-faster-growth.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java
+index 8963ce1e7..1cd802187 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java
+@@ -290,7 +290,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 							)
+ 						),
+ 						enterHome(),
+-						sleep(8000)
++						sleep(2000)
+ 					)
+ 				)
+ 		);
+@@ -367,7 +367,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 							)
+ 						),
+ 						enterHome(),
+-						sleep(8000)
++						sleep(2000)
+ 					)
+ 				)
+ 		);
+@@ -619,7 +619,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 							)
+ 						),
+ 						enterHome(),
+-						sleep(8000)
++						sleep(2000)
+ 					)
+ 				)
+ 		);
+@@ -679,7 +679,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 							)
+ 						),
+ 						enterHome(),
+-						sleep(8000)
++						sleep(2000)
+ 					)
+ 				)
+ 		);
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/objects/HiveObject.java b/jsettlers.logic/src/main/java/jsettlers/logic/objects/HiveObject.java
+index 4930e8552..8fabd89ef 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/objects/HiveObject.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/objects/HiveObject.java
+@@ -33,8 +33,8 @@ import jsettlers.logic.map.grid.objects.MapObjectsManager;
+ public final class HiveObject extends ProgressingSoundableObject {
+ 	private static final long serialVersionUID = -8416528218446090558L;
+ 
+-	private static final int[] EMPTY_DURATION_BOUNDS = {90, 180};
+-	private static final int[] GROWTH_DURATION_BOUNDS = {110, 180};
++	private static final int[] EMPTY_DURATION_BOUNDS = {60, 120};
++	private static final int[] GROWTH_DURATION_BOUNDS = {75, 120};
+ 	//private static final int[] BEE_ANIMATION_BOUNDS = {0, 5};
+ 
+ 	private EMapObjectType state;
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Corn.java b/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Corn.java
+index bc2eacf7a..00284a064 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Corn.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Corn.java
+@@ -31,7 +31,7 @@ import jsettlers.logic.map.grid.objects.MapObjectsManager;
+ public final class Corn extends GrowingObject {
+ 	private static final long serialVersionUID = -7535441306083940418L;
+ 
+-	public static final float GROWTH_DURATION = 10 * 60;
++	public static final float GROWTH_DURATION = 7 * 60; // faster than the original (10 * 60)
+ 	public static final float DECOMPOSE_DURATION = 3 * 60;
+ 	public static final float REMOVE_DURATION = 2 * 60;
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Rice.java b/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Rice.java
+index 9568d5877..a75c87984 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Rice.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Rice.java
+@@ -29,7 +29,7 @@ import jsettlers.logic.map.grid.objects.MapObjectsManager;
+ public final class Rice extends GrowingObject {
+ 	private static final long serialVersionUID = 8086261556083213266L;
+ 
+-	public static final float GROWTH_DURATION = 11 * 60;
++	public static final float GROWTH_DURATION = 7 * 60; // faster than the original (11 * 60)
+ 	public static final float DECOMPOSE_DURATION = 3 * 60;
+ 	public static final float REMOVE_DURATION = 2 * 60;
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Wine.java b/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Wine.java
+index 2dba94b0c..9e82fee3f 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Wine.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Wine.java
+@@ -29,7 +29,7 @@ import jsettlers.logic.map.grid.objects.MapObjectsManager;
+ public final class Wine extends GrowingObject {
+ 	private static final long serialVersionUID = -7535441306083940418L;
+ 
+-	public static final float GROWTH_DURATION = 9 * 60;
++	public static final float GROWTH_DURATION = 6 * 60; // faster than the original (9 * 60)
+ 	public static final float DECOMPOSE_DURATION = 3 * 60;
+ 	public static final float REMOVE_DURATION = 2 * 60;
+ 
+PATCH_EOF
+cat > "$WORK/patches/22-settler-messages-and-tool-demand.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+index 0fb7a759a..c31d09956 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+@@ -175,6 +175,17 @@ public class SimpleMessage implements IMessage {
+ 		return new SimpleMessage(EMessageType.NO_FREE_BEARER, "no_free_bearer|" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
+ 	}
+ 
++	/**
++	 * Create a new message that a barrack cannot arm soldiers because there is no free settler who could become a soldier.
++	 *
++	 * @param building
++	 * 		The barrack
++	 * @return The message object
++	 */
++	public static IMessage noFreeSettlerForSoldiers(IBuilding building) {
++		return new SimpleMessage(EMessageType.NO_FREE_BEARER, "no_free_bearer_soldier|" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
++	}
++
+ 	/**
+ 	 *
+ 	 * @param at
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index 3aaa34bf2..6333ecca8 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -505,6 +505,9 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 		} else if (label.startsWith("no_free_bearer|")) {
+ 			String[] parts = label.split("\\|");
+ 			return Labels.getString("message_no_free_bearer", buildingNameOf(parts[1]));
++		} else if (label.startsWith("no_free_bearer_soldier|")) {
++			String[] parts = label.split("\\|");
++			return Labels.getString("message_no_free_bearer_soldier", buildingNameOf(parts[1]));
+ 		} else if (label.startsWith("cannot_find_work_")) {
+ 			return buildingNameOf(label.substring("cannot_find_work_".length())) + ": no work found in its work area.";
+ 		} else if (label.startsWith("no_soldier_available_")) {
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index ba7c4b285..58ad179d7 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -379,7 +379,8 @@ no_soldier_available_TOWER = Vaši strážní věž nelze obsadit: není k dispo
+ no_soldier_available_BIG_TOWER = Vaši velkou strážní věž nelze obsadit: není k dispozici žádný voják.
+ no_soldier_available_CASTLE = Váš hrad nelze obsadit: není k dispozici žádný voják.
+ message_missing_tool = %s nelze obsadit: chybí nástroj (%s).
+-message_no_free_bearer = %s nelze obsadit: není k dispozici žádný volný nosič.
++message_no_free_bearer = %s nelze obsadit: není k dispozici žádný volný osadník.
++message_no_free_bearer_soldier = %s nemůže zbrojit: není k dispozici žádný volný osadník.
+ action_firerer_slow = Pozor! Hra reaguje pomalu.
+ 
+ # progress display
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index e63454ac7..ba8046ff8 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -385,7 +385,8 @@ no_soldier_available_TOWER = Your guard tower can't be occupied: no soldier is a
+ no_soldier_available_BIG_TOWER = Your large guard tower can't be occupied: no soldier is available.
+ no_soldier_available_CASTLE = Your castle can't be occupied: no soldier is available.
+ message_missing_tool = %s can't be occupied: tool missing (%s).
+-message_no_free_bearer = %s can't be occupied: no free carrier is available.
++message_no_free_bearer = %s can't be occupied: no free settler is available.
++message_no_free_bearer_soldier = %s can't arm soldiers: no free settler is available.
+ action_firerer_slow = Warning! The game is responding slowly.
+ 
+ # progress display
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java
+index ee2287608..7045270c8 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java
+@@ -17,6 +17,7 @@ package jsettlers.logic.buildings.military;
+ import jsettlers.common.buildings.EBuildingType;
+ import jsettlers.common.mapobject.EMapObjectType;
+ import jsettlers.common.material.EMaterialType;
++import jsettlers.common.menu.messages.SimpleMessage;
+ import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.movable.ESoldierType;
+ import jsettlers.common.position.ShortPoint2D;
+@@ -25,6 +26,7 @@ import jsettlers.logic.buildings.WorkAreaBuilding;
+ import jsettlers.logic.buildings.stack.IRequestStack;
+ import jsettlers.logic.buildings.stack.IRequestStackListener;
+ import jsettlers.logic.buildings.stack.RequestStack;
++import jsettlers.logic.constants.MatchConstants;
+ import jsettlers.logic.map.grid.partition.manager.manageables.interfaces.IBarrack;
+ import jsettlers.logic.player.Player;
+ 
+@@ -77,6 +79,27 @@ public final class Barrack extends WorkAreaBuilding implements IBarrack, IReques
+ 		}
+ 	}
+ 
++	private static final int WARNING_DELAY = 10 * 1000;
++	private static final int WARNING_REPEAT = 120 * 1000;
++	private int nextWarningTime = 0;
++
++	@Override
++	public void warnNoFreeSettler() {
++		int now = MatchConstants.clock().getTime();
++		if (nextWarningTime == 0) {
++			nextWarningTime = now + WARNING_DELAY;
++		}
++		if (now >= nextWarningTime) {
++			nextWarningTime = now + WARNING_REPEAT;
++			getPlayer().showMessage(SimpleMessage.noFreeSettlerForSoldiers(this));
++		}
++	}
++
++	@Override
++	public void clearNoFreeSettlerWarning() {
++		nextWarningTime = 0;
++	}
++
+ 	@Override
+ 	public void bearerRequestFailed() {
+ 		super.grid.requestSoldierable(this);
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+index fd332444d..c11854a00 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+@@ -315,10 +315,15 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 	private void handleWorkerCreationRequests() {
+ 		Iterator<WorkerCreationRequest> iterator = workerCreationRequests.iterator();
+ 
+-		if (joblessBearer.isEmpty()) {
+-			// every new worker needs a free carrier, tell the player if one is missing for a building
+-			for (WorkerCreationRequest request : workerCreationRequests) {
+-				if (request instanceof WorkerRequest && request.isRequestAlive()) {
++		// Every new worker needs a free settler (carrier). Carriers that are reserved by the minimum carrier setting must not be converted.
++		boolean carriersReserved = settings.getProfessionSettings().getSettings(EMovableType.BEARER).getRemainingAmount() > -1;
++		if (joblessBearer.isEmpty() || carriersReserved) {
++			// tell the player if a settler is missing for a building
++			while (iterator.hasNext()) {
++				WorkerCreationRequest request = iterator.next();
++				if (!request.isRequestAlive()) {
++					iterator.remove();
++				} else if (request instanceof WorkerRequest) {
+ 					WorkerRequest workerRequest = (WorkerRequest) request;
+ 					workerRequest.warnPlayer(SimpleMessage.noFreeBearer(workerRequest.building));
+ 				}
+@@ -382,13 +387,32 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 	private void handleSoldierCreationRequest() {
+ 		SoldierCreationRequest soilderRequest = soldierCreationRequests.poll();
+ 		if (soilderRequest != null) {
+-			IManageableBearer manageableBearer = joblessBearer.removeObjectNextTo(soilderRequest.getPosition());
+-			if (manageableBearer == null || !manageableBearer.becomeSoldier(soilderRequest.getBarrack())) {
++			// Soldiers may only be armed from free settlers: carriers that are reserved by the minimum carrier setting must stay carriers.
++			boolean carriersReserved = settings.getProfessionSettings().getSettings(EMovableType.BEARER).getRemainingAmount() > -1;
++			IManageableBearer manageableBearer = carriersReserved ? null : joblessBearer.removeObjectNextTo(soilderRequest.getPosition());
++			if (manageableBearer == null) {
++				// weapons are waiting, but there is no free settler who could take them
++				soilderRequest.getBarrack().warnNoFreeSettler();
+ 				soldierCreationRequests.addLast(soilderRequest);
++			} else if (!manageableBearer.becomeSoldier(this, soilderRequest.getBarrack())) {
++				soldierCreationRequests.addLast(soilderRequest);
++			} else {
++				settings.getProfessionSettings().markTempBearerConversion(EMovableType.SWORDSMAN_L1);
++				soilderRequest.getBarrack().clearNoFreeSettlerWarning();
+ 			}
+ 		}
+ 	}
+ 
++	@Override
++	public void soldierCreationFulfilled() {
++		settings.getProfessionSettings().applyBearerConversion(EMovableType.SWORDSMAN_L1);
++	}
++
++	@Override
++	public void soldierCreationFailed() {
++		settings.getProfessionSettings().abortBearerConversion(EMovableType.SWORDSMAN_L1);
++	}
++
+ 	private void handleDiggerRequest() {
+ 		DiggerRequest request = diggerRequests.peek();
+ 		if (request == null) {
+@@ -463,6 +487,37 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 			}
+ 		}
+ 
++		if (bestTool == null) {
++			bestTool = popToolForProfessionSettings();
++		}
++
++		return bestTool;
++	}
++
++	/**
++	 * Tools of diggers and bricklayers that are missing to reach the numbers set in the settlers' profession settings. This keeps the tool smithy
++	 * working when the player raises these numbers later in the game, even if no request is waiting for a tool at that moment.
++	 *
++	 * @return The tool that should be produced or <code>null</code> if no tool is missing.
++	 */
++	private EMaterialType popToolForProfessionSettings() {
++		ProfessionSettings professionSettings = settings.getProfessionSettings();
++		int spareBearers = (int) Math.floor(-professionSettings.getSettings(EMovableType.BEARER).getRemainingAmount());
++		if (spareBearers < 1) {
++			return null; // no carrier could be converted anyway
++		}
++
++		EMaterialType bestTool = null;
++		int bestMissing = 0;
++		for (EMovableType type : new EMovableType[] { EMovableType.DIGGER, EMovableType.BRICKLAYER }) {
++			EMaterialType tool = type.getTool();
++			int wanted = Math.min((int) Math.floor(professionSettings.getSettings(type).getRemainingAmount()), spareBearers);
++			int missing = wanted - materialOffers.getMaterialCounts().getAmountOf(tool);
++			if (missing > bestMissing) {
++				bestMissing = missing;
++				bestTool = tool;
++			}
++		}
+ 		return bestTool;
+ 	}
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBearer.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBearer.java
+index 05b6fd0d1..b875c3158 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBearer.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBearer.java
+@@ -29,7 +29,7 @@ public interface IManageableBearer extends IManageable, ILocatable, IManagerBear
+ 
+ 	boolean becomeWorker(IWorkerRequester requester, WorkerCreationRequest request, IMaterialOffer offer);
+ 
+-	boolean becomeSoldier(IBarrack barrack);
++	boolean becomeSoldier(IWorkerRequester requester, IBarrack barrack);
+ 
+ 	/**
+ 	 * This interface is used by the bearers to signal the need of a reoffer of the worker creation request.
+@@ -40,5 +40,15 @@ public interface IManageableBearer extends IManageable, ILocatable, IManagerBear
+ 		void workerCreationRequestFailed(WorkerCreationRequest failedRequest);
+ 
+ 		void workerCreationRequestFulfilled(WorkerCreationRequest fulfilledRequest);
++
++		/**
++		 * Called when a bearer, who was sent to a barrack, has become a soldier.
++		 */
++		void soldierCreationFulfilled();
++
++		/**
++		 * Called when a bearer, who was sent to a barrack, could not become a soldier.
++		 */
++		void soldierCreationFailed();
+ 	}
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java
+index ffefc09c4..896d7ce71 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java
+@@ -49,4 +49,15 @@ public interface IBarrack extends ILocatable {
+ 	 * @return Returns the position where the newly created soldier should walk.
+ 	 */
+ 	ShortPoint2D getSoldierTargetPosition();
++
++	/**
++	 * Tells the player that weapons are waiting in this barrack but no free settler is available to become a soldier. The message is delayed and
++	 * repeated from time to time while the situation lasts.
++	 */
++	void warnNoFreeSettler();
++
++	/**
++	 * Called when a free settler has been found, so the next shortage is announced again after the usual delay.
++	 */
++	void clearNoFreeSettlerWarning();
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BearerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BearerMovable.java
+index 836b7a918..ebc3d4a9e 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BearerMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BearerMovable.java
+@@ -38,6 +38,7 @@ public class BearerMovable extends CivilianMovable implements IBearerMovable, IM
+ 	private IBarrack              barrack;
+ 	private IManageableBearer.IWorkerRequester workerRequester;
+ 	private WorkerCreationRequest workerCreationRequest;
++	private IManageableBearer.IWorkerRequester soldierRequester;
+ 
+ 	private boolean registered = false;
+ 
+@@ -104,6 +105,8 @@ public class BearerMovable extends CivilianMovable implements IBearerMovable, IM
+ 
+ 								ShortPoint2D targetPosition = mov.barrack.getSoldierTargetPosition();
+ 								mov.barrack = null;
++								mov.soldierRequester.soldierCreationFulfilled();
++								mov.soldierRequester = null;
+ 
+ 
+ 								mov.player.getEndgameStatistic().incrementAmountOfProducedSoldiers();
+@@ -162,6 +165,7 @@ public class BearerMovable extends CivilianMovable implements IBearerMovable, IM
+ 						mov.offer = null;
+ 						mov.request = null;
+ 						mov.barrack = null;
++						mov.soldierRequester = null;
+ 						mov.materialType = null;
+ 						mov.workerRequester = null;
+ 						mov.workerCreationRequest = null;
+@@ -240,6 +244,10 @@ public class BearerMovable extends CivilianMovable implements IBearerMovable, IM
+ 		}
+ 
+ 		if(barrack != null) {
++			if(soldierRequester != null) {
++				soldierRequester.soldierCreationFailed();
++				soldierRequester = null;
++			}
+ 			barrack.bearerRequestFailed();
+ 			barrack = null;
+ 		}
+@@ -274,9 +282,10 @@ public class BearerMovable extends CivilianMovable implements IBearerMovable, IM
+ 	}
+ 
+ 	@Override
+-	public boolean becomeSoldier(IBarrack barrack) {
++	public boolean becomeSoldier(IManageableBearer.IWorkerRequester requester, IBarrack barrack) {
+ 		if(!registered) return false;
+ 
++		this.soldierRequester = requester;
+ 		this.barrack = barrack;
+ 		registered = false;
+ 		return true;
+PATCH_EOF
+PATCH_NAMES="01-lan-multiplayer-broadcast 02-endgame-player-names 03-gifts-of-the-gods-spell 04-soldiers-ignore-far-civilians 05-font-quality-and-size 06-building-cost-tooltip 07-tooltip-position 08-in-game-messages 09-messages-layout-and-settings-file 10-game-speed-and-fps-limit 11-amazon-storage-shadow 12-language-selection-czech 13-thief-fixes 14-zoom-indicator 15-control-groups 16-peacetime 17-hd-graphics 18-smithy-output 19-auto-work-area 20-convert-specialists-to-bearers 21-faster-growth 22-settler-messages-and-tool-demand"
 for P in $PATCH_NAMES; do
 	git apply --check "$WORK/patches/$P.patch" || die "Patch $P cannot be applied - the source code has changed since the tested version."
 	git apply --whitespace=nowarn "$WORK/patches/$P.patch"
@@ -3725,6 +7427,12 @@ grep -q "homePos" jsettlers.logic/src/main/java/jsettlers/logic/movable/speciali
 grep -q "map-zoom" jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java || die "Patch 14 was not applied."
 grep -q "RECALL_GROUP" jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java || die "Patch 15 was not applied."
 grep -q "isPeaceTime" jsettlers.logic/src/main/java/jsettlers/logic/constants/MatchConstants.java || die "Patch 16 was not applied."
+grep -q "class HdGraphics" jsettlers.graphics/src/main/java/jsettlers/graphics/image/hd/HdGraphics.java || die "Patch 17 was not applied."
+grep -q "addSmithyOutput" jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java || die "Patch 18 was not applied."
+grep -q "moveWorkAreaToWork" jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java || die "Patch 19 was not applied."
+grep -q "IConvertibleToBearer" jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/GeologistMovable.java || die "Patch 20 was not applied."
+grep -q "faster than the original" jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Corn.java || die "Patch 21 was not applied."
+grep -q "popToolForProfessionSettings" jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java || die "Patch 22 was not applied."
 
 # ---------------------------------------------------------------- compilation
 say "Compiling (the first run takes several minutes, dependencies are downloaded)"
@@ -3743,6 +7451,57 @@ mkdir -p "$WORK/stage/input" "$WORK/dist"
 cp "$LIBDIR"/*.jar "$WORK/stage/input/"
 cp "$DEPDIR"/*.jar "$WORK/stage/input/"
 cp -R "$SRC/maps/release" "$WORK/stage/input/maps"
+
+# ---------------------------------------------------------------- optional AI engine for the HD graphics
+# The HD graphics (patch 17) always work with the built-in enlarger. If this step succeeds, the game also contains
+# Real-ESRGAN ncnn Vulkan (MIT license, https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan), which makes better colours.
+# The engine is only a program; the enlarged game images are made later on the computer of the player.
+say "Preparing the optional AI engine for the HD graphics (Real-ESRGAN ncnn Vulkan)"
+HD_ENGINE_URL="https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-macos.zip"
+HD_ENGINE_DIR="$WORK/stage/input/hd-engine"
+HD_ENGINE_INCLUDED=0
+set +e   # (errexit must stay active inside the sub-shell below, so it is not used as an "if" condition)
+(
+	set -e
+	DL="$WORK/downloads/hd-engine"
+	mkdir -p "$DL"
+	[[ -s "$DL/engine.zip" ]] || curl -fL --retry 3 --connect-timeout 30 -o "$DL/engine.zip" "$HD_ENGINE_URL"
+	rm -rf "$DL/unzipped"
+	mkdir -p "$DL/unzipped"
+	unzip -q -o "$DL/engine.zip" -d "$DL/unzipped"
+	EXE="$(find "$DL/unzipped" -type f -name realesrgan-ncnn-vulkan | head -1)"
+	[[ -n "$EXE" ]] || { echo "the program is not in the archive"; exit 1; }
+	EXEDIR="$(dirname "$EXE")"
+	[[ -f "$EXEDIR/models/realesr-animevideov3-x2.param" && -f "$EXEDIR/models/realesr-animevideov3-x2.bin" ]] || { echo "the model is not in the archive"; exit 1; }
+	rm -rf "$HD_ENGINE_DIR"
+	mkdir -p "$HD_ENGINE_DIR/models"
+	for item in "$EXEDIR"/*; do
+		[[ "$(basename "$item")" == "models" ]] || cp -R "$item" "$HD_ENGINE_DIR/"
+	done
+	cp "$EXEDIR/models/realesr-animevideov3-x2.param" "$EXEDIR/models/realesr-animevideov3-x2.bin" "$HD_ENGINE_DIR/models/"
+	chmod +x "$HD_ENGINE_DIR/realesrgan-ncnn-vulkan"
+	xattr -cr "$HD_ENGINE_DIR" 2>/dev/null || true
+	codesign --force --sign - "$HD_ENGINE_DIR/realesrgan-ncnn-vulkan" 2>/dev/null || true
+
+	# smoke test: the engine has to enlarge a small picture on this Mac, otherwise it is not used
+	TEST="$DL/test"
+	rm -rf "$TEST"
+	mkdir -p "$TEST"
+	echo "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==" | base64 -D > "$TEST/one.png"
+	sips -z 32 32 "$TEST/one.png" --out "$TEST/in.png" >/dev/null
+	perl -e 'alarm 180; exec @ARGV' "$HD_ENGINE_DIR/realesrgan-ncnn-vulkan" -i "$TEST/in.png" -o "$TEST/out.png" \
+		-n realesr-animevideov3 -s 2 -f png -m "$HD_ENGINE_DIR/models" >"$TEST/log.txt" 2>&1 || { cat "$TEST/log.txt"; exit 1; }
+	[[ "$(sips -g pixelWidth "$TEST/out.png" 2>/dev/null | awk '/pixelWidth/ {print $2}')" == "64" ]] || { cat "$TEST/log.txt"; exit 1; }
+) >"$WORK/hd-engine-step.log" 2>&1
+HD_ENGINE_RC=$?
+set -e
+if [[ $HD_ENGINE_RC -eq 0 ]]; then
+	HD_ENGINE_INCLUDED=1
+	echo "The AI engine works and is included in the app."
+else
+	rm -rf "$HD_ENGINE_DIR"
+	echo "(The AI engine could not be prepared, see $WORK/hd-engine-step.log. The HD graphics will use the built-in enlarger.)"
+fi
 
 MAIN_JAR="$(cd "$WORK/stage/input" && ls jsettlers.main.swing*.jar 2>/dev/null | head -1)"
 [[ -n "$MAIN_JAR" ]] || die "The main jar (jsettlers.main.swing*.jar) was not found."
@@ -3788,6 +7547,7 @@ fi
 	--app-version 1.0.0 \
 	--java-options "-Xmx2G" \
 	--java-options '-Dsettlers.maps=$APPDIR/maps' \
+	--java-options '-Dsettlers.hd.engine=$APPDIR/hd-engine' \
 	${ICON_ARGS[@]+"${ICON_ARGS[@]}"}
 
 APP="$WORK/out/JSettlers.app"
@@ -3870,6 +7630,12 @@ JSettlers / settlers-remake
   The changes of this build (patches) are published under the same MIT license.
   Third-party textures used by the game are listed in TEXTURES.md of the upstream project.
 
+HD graphics (optional, off by default)
+  The enlarged images are made on the computer of the player from his own copy of The Settlers III and are stored only there
+  (~/Library/Application Support/JSettlers/hd). They are never part of this app. If the app contains the folder hd-engine, it
+  holds Real-ESRGAN ncnn Vulkan (MIT license, https://github.com/xinntao/Real-ESRGAN-ncnn-vulkan) with the model
+  realesr-animevideov3 (BSD-3-Clause, https://github.com/xinntao/Real-ESRGAN), used to make the enlarged images.
+
 Bundled Java runtime
   OpenJDK (build of the JDK this app was built with), GPL v2 with the Classpath Exception, https://openjdk.org
 
@@ -3904,6 +7670,8 @@ Tips: Control + two-finger click (secondary click) = forced move, your units ign
 Option + two-finger click = patrol. With a mouse use Control/Option + right click.
 The zoom shown at the top right (100% = original size) helps to find the normal view again.
 Click on a message at the bottom of the screen = jump to the place it is about.
+HD graphics: Settings > "HD graphics" = Yes, then restart. The first start enlarges the graphics of your own game files
+(a few minutes) and stores them in ~/Library/Application Support/JSettlers/hd. Delete that folder to start over.
 
 Project page, manual, known issues and the source code: see the README of the project on GitHub.
 README_EOF

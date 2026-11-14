@@ -1,0 +1,141 @@
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+index 0eb7c83a2..5dab815c0 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+@@ -20,6 +20,7 @@ import java.util.Optional;
+ import go.graphics.GLDrawContext;
+ import go.graphics.text.EFontSize;
+ import jsettlers.common.buildings.BuildingVariant;
++import jsettlers.common.buildings.EBuildingType;
+ import jsettlers.common.buildings.IBuilding;
+ import jsettlers.common.images.EImageLinkType;
+ import jsettlers.common.images.ImageLink;
+@@ -400,21 +401,52 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+ 		}
+ 	}
+ 
++	private static final int SMITHY_BUTTONS_PER_ROW = 5;
++	/** Gap between two rows of material buttons, relative to the height of one row (3 of 29 pixels). */
++	private static final float SMITHY_ROW_GAP = 3f / 29;
++
+ 	private void addRequestAndOfferStacks(UIPanel materialArea, BuildingState state) {
+ 		// hardcoded...
+ 		float buttonWidth = 18f / (127 - 9);
+ 		float buttonSpace = 12f / (127 - 9);
+ 
++		List<StackState> stacks = state.getStackStates();
++
++		// The tool and weapon smithies can have many different products lying at the building. Up to 5 buttons stay in one row (with a smaller
++		// gap if needed). With more, the first row moves up and the rest is placed in rows below it, the last row at the original position.
++		boolean smithy = building.getBuildingVariant().getType() == EBuildingType.TOOLSMITH
++				|| building.getBuildingVariant().getType() == EBuildingType.WEAPONSMITH;
++		int perRow = Integer.MAX_VALUE;
++		if (smithy) {
++			perRow = SMITHY_BUTTONS_PER_ROW;
++			if (stacks.size() > 3) {
++				int inRow = Math.min(stacks.size(), perRow);
++				buttonSpace = (1 - inRow * buttonWidth) / (inRow + 1);
++			}
++		}
++		int rows = Math.max(1, (stacks.size() + perRow - 1) / perRow);
++		float rowStep = 1 + SMITHY_ROW_GAP;
++
+ 		float requestX = buttonSpace;
+ 		float offerX = 1 - buttonSpace - buttonWidth;
++		int index = 0;
++		for (StackState mat : stacks) {
++			int row = index / perRow;
++			if (index % perRow == 0) {
++				requestX = buttonSpace;
++				offerX = 1 - buttonSpace - buttonWidth;
++			}
++			index++;
++
++			float bottom = (rows - 1 - row) * rowStep;
++			float top = bottom + 1;
+ 
+-		for (StackState mat : state.getStackStates()) {
+ 			MaterialDisplay display = new MaterialDisplay(mat);
+ 			if (mat.isOffering()) {
+-				materialArea.addChild(display, offerX, 0, offerX + buttonWidth, 1);
++				materialArea.addChild(display, offerX, bottom, offerX + buttonWidth, top);
+ 				offerX -= buttonSpace + buttonWidth;
+ 			} else {
+-				materialArea.addChild(display, requestX, 0, requestX + buttonWidth, 1);
++				materialArea.addChild(display, requestX, bottom, requestX + buttonWidth, top);
+ 				requestX += buttonSpace + buttonWidth;
+ 			}
+ 		}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java
+index 721e41d6a..7cd1c5b98 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java
+@@ -35,6 +35,7 @@ import jsettlers.common.buildings.stacks.ConstructionStack;
+ import jsettlers.common.buildings.stacks.RelativeStack;
+ import jsettlers.common.map.shapes.FreeMapArea;
+ import jsettlers.common.mapobject.EMapObjectType;
++import jsettlers.common.material.EMaterialType;
+ import jsettlers.common.material.EPriority;
+ import jsettlers.common.movable.EDirection;
+ import jsettlers.common.player.IPlayerable;
+@@ -670,11 +671,41 @@ public abstract class Building extends AbstractHexMapObject implements IConstruc
+ 				byte stackSize = grid.getRequestStackGrid().getStackSize(offerStack.calculatePoint(pos), offerStack.getMaterialType());
+ 				materials.add(new BuildingMaterial(offerStack.getMaterialType(), stackSize, true));
+ 			}
++
++			addSmithyOutput(materials);
+ 		}
+ 
+ 		return materials;
+ 	}
+ 
++	/**
++	 * The tool and weapon smithies have no fixed offer stacks, they drop whatever they produced at one position. Show every kind that currently lies
++	 * there so the player can see what has to be carried away.
++	 */
++	private void addSmithyOutput(List<IBuildingMaterial> materials) {
++		Collection<EMaterialType> products;
++		if (type == EBuildingType.TOOLSMITH) {
++			products = EMaterialType.TOOLS;
++		} else if (type == EBuildingType.WEAPONSMITH) {
++			products = EMaterialType.WEAPONS;
++		} else {
++			return;
++		}
++
++		RelativePoint dropPosition = getBuildingVariant().getSmithDropPosition();
++		if (dropPosition == null) {
++			return;
++		}
++		ShortPoint2D dropPoint = dropPosition.calculatePoint(pos);
++
++		for (EMaterialType product : products) {
++			byte stackSize = grid.getRequestStackGrid().getStackSize(dropPoint, product);
++			if (stackSize > 0) {
++				materials.add(new BuildingMaterial(product, stackSize, true));
++			}
++		}
++	}
++
+ 	public void setPriority(EPriority newPriority) {
+ 		this.priority = newPriority;
+ 		if (stacks != null) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+index 10294909a..fd332444d 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+@@ -448,9 +448,13 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 				continue; // skip inactive requests and requests not needing a tool production
+ 			}
+ 
++			EMaterialType tool = request.requestedMovableType().getTool();
++			if (materialOffers.getOfferCloseTo(tool, EOfferPriority.LOWEST, request.getPosition()) != null) {
++				continue; // this tool has already been produced and only waits to be picked up, do not produce more of it
++			}
++
+ 			request.setToolProductionRequired(false); // FIXME @andreas-eberle: Investigate if this is correct! And why it doesn't break the system
+ 
+-			EMaterialType tool = request.requestedMovableType().getTool();
+ 			byte prio = priorityForTool[tool.ordinal];
+ 
+ 			if (prio > bestPrio) {

@@ -1,0 +1,310 @@
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+index 0fb7a759a..c31d09956 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+@@ -175,6 +175,17 @@ public class SimpleMessage implements IMessage {
+ 		return new SimpleMessage(EMessageType.NO_FREE_BEARER, "no_free_bearer|" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
+ 	}
+ 
++	/**
++	 * Create a new message that a barrack cannot arm soldiers because there is no free settler who could become a soldier.
++	 *
++	 * @param building
++	 * 		The barrack
++	 * @return The message object
++	 */
++	public static IMessage noFreeSettlerForSoldiers(IBuilding building) {
++		return new SimpleMessage(EMessageType.NO_FREE_BEARER, "no_free_bearer_soldier|" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
++	}
++
+ 	/**
+ 	 *
+ 	 * @param at
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index 3aaa34bf2..6333ecca8 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -505,6 +505,9 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 		} else if (label.startsWith("no_free_bearer|")) {
+ 			String[] parts = label.split("\\|");
+ 			return Labels.getString("message_no_free_bearer", buildingNameOf(parts[1]));
++		} else if (label.startsWith("no_free_bearer_soldier|")) {
++			String[] parts = label.split("\\|");
++			return Labels.getString("message_no_free_bearer_soldier", buildingNameOf(parts[1]));
+ 		} else if (label.startsWith("cannot_find_work_")) {
+ 			return buildingNameOf(label.substring("cannot_find_work_".length())) + ": no work found in its work area.";
+ 		} else if (label.startsWith("no_soldier_available_")) {
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index ba7c4b285..58ad179d7 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -379,7 +379,8 @@ no_soldier_available_TOWER = Vaši strážní věž nelze obsadit: není k dispo
+ no_soldier_available_BIG_TOWER = Vaši velkou strážní věž nelze obsadit: není k dispozici žádný voják.
+ no_soldier_available_CASTLE = Váš hrad nelze obsadit: není k dispozici žádný voják.
+ message_missing_tool = %s nelze obsadit: chybí nástroj (%s).
+-message_no_free_bearer = %s nelze obsadit: není k dispozici žádný volný nosič.
++message_no_free_bearer = %s nelze obsadit: není k dispozici žádný volný osadník.
++message_no_free_bearer_soldier = %s nemůže zbrojit: není k dispozici žádný volný osadník.
+ action_firerer_slow = Pozor! Hra reaguje pomalu.
+ 
+ # progress display
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index e63454ac7..ba8046ff8 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -385,7 +385,8 @@ no_soldier_available_TOWER = Your guard tower can't be occupied: no soldier is a
+ no_soldier_available_BIG_TOWER = Your large guard tower can't be occupied: no soldier is available.
+ no_soldier_available_CASTLE = Your castle can't be occupied: no soldier is available.
+ message_missing_tool = %s can't be occupied: tool missing (%s).
+-message_no_free_bearer = %s can't be occupied: no free carrier is available.
++message_no_free_bearer = %s can't be occupied: no free settler is available.
++message_no_free_bearer_soldier = %s can't arm soldiers: no free settler is available.
+ action_firerer_slow = Warning! The game is responding slowly.
+ 
+ # progress display
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java
+index ee2287608..7045270c8 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java
+@@ -17,6 +17,7 @@ package jsettlers.logic.buildings.military;
+ import jsettlers.common.buildings.EBuildingType;
+ import jsettlers.common.mapobject.EMapObjectType;
+ import jsettlers.common.material.EMaterialType;
++import jsettlers.common.menu.messages.SimpleMessage;
+ import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.movable.ESoldierType;
+ import jsettlers.common.position.ShortPoint2D;
+@@ -25,6 +26,7 @@ import jsettlers.logic.buildings.WorkAreaBuilding;
+ import jsettlers.logic.buildings.stack.IRequestStack;
+ import jsettlers.logic.buildings.stack.IRequestStackListener;
+ import jsettlers.logic.buildings.stack.RequestStack;
++import jsettlers.logic.constants.MatchConstants;
+ import jsettlers.logic.map.grid.partition.manager.manageables.interfaces.IBarrack;
+ import jsettlers.logic.player.Player;
+ 
+@@ -77,6 +79,27 @@ public final class Barrack extends WorkAreaBuilding implements IBarrack, IReques
+ 		}
+ 	}
+ 
++	private static final int WARNING_DELAY = 10 * 1000;
++	private static final int WARNING_REPEAT = 120 * 1000;
++	private int nextWarningTime = 0;
++
++	@Override
++	public void warnNoFreeSettler() {
++		int now = MatchConstants.clock().getTime();
++		if (nextWarningTime == 0) {
++			nextWarningTime = now + WARNING_DELAY;
++		}
++		if (now >= nextWarningTime) {
++			nextWarningTime = now + WARNING_REPEAT;
++			getPlayer().showMessage(SimpleMessage.noFreeSettlerForSoldiers(this));
++		}
++	}
++
++	@Override
++	public void clearNoFreeSettlerWarning() {
++		nextWarningTime = 0;
++	}
++
+ 	@Override
+ 	public void bearerRequestFailed() {
+ 		super.grid.requestSoldierable(this);
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+index fd332444d..c11854a00 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+@@ -315,10 +315,15 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 	private void handleWorkerCreationRequests() {
+ 		Iterator<WorkerCreationRequest> iterator = workerCreationRequests.iterator();
+ 
+-		if (joblessBearer.isEmpty()) {
+-			// every new worker needs a free carrier, tell the player if one is missing for a building
+-			for (WorkerCreationRequest request : workerCreationRequests) {
+-				if (request instanceof WorkerRequest && request.isRequestAlive()) {
++		// Every new worker needs a free settler (carrier). Carriers that are reserved by the minimum carrier setting must not be converted.
++		boolean carriersReserved = settings.getProfessionSettings().getSettings(EMovableType.BEARER).getRemainingAmount() > -1;
++		if (joblessBearer.isEmpty() || carriersReserved) {
++			// tell the player if a settler is missing for a building
++			while (iterator.hasNext()) {
++				WorkerCreationRequest request = iterator.next();
++				if (!request.isRequestAlive()) {
++					iterator.remove();
++				} else if (request instanceof WorkerRequest) {
+ 					WorkerRequest workerRequest = (WorkerRequest) request;
+ 					workerRequest.warnPlayer(SimpleMessage.noFreeBearer(workerRequest.building));
+ 				}
+@@ -382,13 +387,32 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 	private void handleSoldierCreationRequest() {
+ 		SoldierCreationRequest soilderRequest = soldierCreationRequests.poll();
+ 		if (soilderRequest != null) {
+-			IManageableBearer manageableBearer = joblessBearer.removeObjectNextTo(soilderRequest.getPosition());
+-			if (manageableBearer == null || !manageableBearer.becomeSoldier(soilderRequest.getBarrack())) {
++			// Soldiers may only be armed from free settlers: carriers that are reserved by the minimum carrier setting must stay carriers.
++			boolean carriersReserved = settings.getProfessionSettings().getSettings(EMovableType.BEARER).getRemainingAmount() > -1;
++			IManageableBearer manageableBearer = carriersReserved ? null : joblessBearer.removeObjectNextTo(soilderRequest.getPosition());
++			if (manageableBearer == null) {
++				// weapons are waiting, but there is no free settler who could take them
++				soilderRequest.getBarrack().warnNoFreeSettler();
+ 				soldierCreationRequests.addLast(soilderRequest);
++			} else if (!manageableBearer.becomeSoldier(this, soilderRequest.getBarrack())) {
++				soldierCreationRequests.addLast(soilderRequest);
++			} else {
++				settings.getProfessionSettings().markTempBearerConversion(EMovableType.SWORDSMAN_L1);
++				soilderRequest.getBarrack().clearNoFreeSettlerWarning();
+ 			}
+ 		}
+ 	}
+ 
++	@Override
++	public void soldierCreationFulfilled() {
++		settings.getProfessionSettings().applyBearerConversion(EMovableType.SWORDSMAN_L1);
++	}
++
++	@Override
++	public void soldierCreationFailed() {
++		settings.getProfessionSettings().abortBearerConversion(EMovableType.SWORDSMAN_L1);
++	}
++
+ 	private void handleDiggerRequest() {
+ 		DiggerRequest request = diggerRequests.peek();
+ 		if (request == null) {
+@@ -463,6 +487,37 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 			}
+ 		}
+ 
++		if (bestTool == null) {
++			bestTool = popToolForProfessionSettings();
++		}
++
++		return bestTool;
++	}
++
++	/**
++	 * Tools of diggers and bricklayers that are missing to reach the numbers set in the settlers' profession settings. This keeps the tool smithy
++	 * working when the player raises these numbers later in the game, even if no request is waiting for a tool at that moment.
++	 *
++	 * @return The tool that should be produced or <code>null</code> if no tool is missing.
++	 */
++	private EMaterialType popToolForProfessionSettings() {
++		ProfessionSettings professionSettings = settings.getProfessionSettings();
++		int spareBearers = (int) Math.floor(-professionSettings.getSettings(EMovableType.BEARER).getRemainingAmount());
++		if (spareBearers < 1) {
++			return null; // no carrier could be converted anyway
++		}
++
++		EMaterialType bestTool = null;
++		int bestMissing = 0;
++		for (EMovableType type : new EMovableType[] { EMovableType.DIGGER, EMovableType.BRICKLAYER }) {
++			EMaterialType tool = type.getTool();
++			int wanted = Math.min((int) Math.floor(professionSettings.getSettings(type).getRemainingAmount()), spareBearers);
++			int missing = wanted - materialOffers.getMaterialCounts().getAmountOf(tool);
++			if (missing > bestMissing) {
++				bestMissing = missing;
++				bestTool = tool;
++			}
++		}
+ 		return bestTool;
+ 	}
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBearer.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBearer.java
+index 05b6fd0d1..b875c3158 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBearer.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBearer.java
+@@ -29,7 +29,7 @@ public interface IManageableBearer extends IManageable, ILocatable, IManagerBear
+ 
+ 	boolean becomeWorker(IWorkerRequester requester, WorkerCreationRequest request, IMaterialOffer offer);
+ 
+-	boolean becomeSoldier(IBarrack barrack);
++	boolean becomeSoldier(IWorkerRequester requester, IBarrack barrack);
+ 
+ 	/**
+ 	 * This interface is used by the bearers to signal the need of a reoffer of the worker creation request.
+@@ -40,5 +40,15 @@ public interface IManageableBearer extends IManageable, ILocatable, IManagerBear
+ 		void workerCreationRequestFailed(WorkerCreationRequest failedRequest);
+ 
+ 		void workerCreationRequestFulfilled(WorkerCreationRequest fulfilledRequest);
++
++		/**
++		 * Called when a bearer, who was sent to a barrack, has become a soldier.
++		 */
++		void soldierCreationFulfilled();
++
++		/**
++		 * Called when a bearer, who was sent to a barrack, could not become a soldier.
++		 */
++		void soldierCreationFailed();
+ 	}
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java
+index ffefc09c4..896d7ce71 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java
+@@ -49,4 +49,15 @@ public interface IBarrack extends ILocatable {
+ 	 * @return Returns the position where the newly created soldier should walk.
+ 	 */
+ 	ShortPoint2D getSoldierTargetPosition();
++
++	/**
++	 * Tells the player that weapons are waiting in this barrack but no free settler is available to become a soldier. The message is delayed and
++	 * repeated from time to time while the situation lasts.
++	 */
++	void warnNoFreeSettler();
++
++	/**
++	 * Called when a free settler has been found, so the next shortage is announced again after the usual delay.
++	 */
++	void clearNoFreeSettlerWarning();
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BearerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BearerMovable.java
+index 836b7a918..ebc3d4a9e 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BearerMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BearerMovable.java
+@@ -38,6 +38,7 @@ public class BearerMovable extends CivilianMovable implements IBearerMovable, IM
+ 	private IBarrack              barrack;
+ 	private IManageableBearer.IWorkerRequester workerRequester;
+ 	private WorkerCreationRequest workerCreationRequest;
++	private IManageableBearer.IWorkerRequester soldierRequester;
+ 
+ 	private boolean registered = false;
+ 
+@@ -104,6 +105,8 @@ public class BearerMovable extends CivilianMovable implements IBearerMovable, IM
+ 
+ 								ShortPoint2D targetPosition = mov.barrack.getSoldierTargetPosition();
+ 								mov.barrack = null;
++								mov.soldierRequester.soldierCreationFulfilled();
++								mov.soldierRequester = null;
+ 
+ 
+ 								mov.player.getEndgameStatistic().incrementAmountOfProducedSoldiers();
+@@ -162,6 +165,7 @@ public class BearerMovable extends CivilianMovable implements IBearerMovable, IM
+ 						mov.offer = null;
+ 						mov.request = null;
+ 						mov.barrack = null;
++						mov.soldierRequester = null;
+ 						mov.materialType = null;
+ 						mov.workerRequester = null;
+ 						mov.workerCreationRequest = null;
+@@ -240,6 +244,10 @@ public class BearerMovable extends CivilianMovable implements IBearerMovable, IM
+ 		}
+ 
+ 		if(barrack != null) {
++			if(soldierRequester != null) {
++				soldierRequester.soldierCreationFailed();
++				soldierRequester = null;
++			}
+ 			barrack.bearerRequestFailed();
+ 			barrack = null;
+ 		}
+@@ -274,9 +282,10 @@ public class BearerMovable extends CivilianMovable implements IBearerMovable, IM
+ 	}
+ 
+ 	@Override
+-	public boolean becomeSoldier(IBarrack barrack) {
++	public boolean becomeSoldier(IManageableBearer.IWorkerRequester requester, IBarrack barrack) {
+ 		if(!registered) return false;
+ 
++		this.soldierRequester = requester;
+ 		this.barrack = barrack;
+ 		registered = false;
+ 		return true;

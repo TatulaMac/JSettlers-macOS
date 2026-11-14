@@ -1,0 +1,94 @@
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java
+index 8963ce1e7..1cd802187 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/SimpleBuildingWorkerMovable.java
+@@ -290,7 +290,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 							)
+ 						),
+ 						enterHome(),
+-						sleep(8000)
++						sleep(2000)
+ 					)
+ 				)
+ 		);
+@@ -367,7 +367,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 							)
+ 						),
+ 						enterHome(),
+-						sleep(8000)
++						sleep(2000)
+ 					)
+ 				)
+ 		);
+@@ -619,7 +619,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 							)
+ 						),
+ 						enterHome(),
+-						sleep(8000)
++						sleep(2000)
+ 					)
+ 				)
+ 		);
+@@ -679,7 +679,7 @@ public class SimpleBuildingWorkerMovable extends BuildingWorkerMovable {
+ 							)
+ 						),
+ 						enterHome(),
+-						sleep(8000)
++						sleep(2000)
+ 					)
+ 				)
+ 		);
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/objects/HiveObject.java b/jsettlers.logic/src/main/java/jsettlers/logic/objects/HiveObject.java
+index 4930e8552..8fabd89ef 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/objects/HiveObject.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/objects/HiveObject.java
+@@ -33,8 +33,8 @@ import jsettlers.logic.map.grid.objects.MapObjectsManager;
+ public final class HiveObject extends ProgressingSoundableObject {
+ 	private static final long serialVersionUID = -8416528218446090558L;
+ 
+-	private static final int[] EMPTY_DURATION_BOUNDS = {90, 180};
+-	private static final int[] GROWTH_DURATION_BOUNDS = {110, 180};
++	private static final int[] EMPTY_DURATION_BOUNDS = {60, 120};
++	private static final int[] GROWTH_DURATION_BOUNDS = {75, 120};
+ 	//private static final int[] BEE_ANIMATION_BOUNDS = {0, 5};
+ 
+ 	private EMapObjectType state;
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Corn.java b/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Corn.java
+index bc2eacf7a..00284a064 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Corn.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Corn.java
+@@ -31,7 +31,7 @@ import jsettlers.logic.map.grid.objects.MapObjectsManager;
+ public final class Corn extends GrowingObject {
+ 	private static final long serialVersionUID = -7535441306083940418L;
+ 
+-	public static final float GROWTH_DURATION = 10 * 60;
++	public static final float GROWTH_DURATION = 7 * 60; // faster than the original (10 * 60)
+ 	public static final float DECOMPOSE_DURATION = 3 * 60;
+ 	public static final float REMOVE_DURATION = 2 * 60;
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Rice.java b/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Rice.java
+index 9568d5877..a75c87984 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Rice.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Rice.java
+@@ -29,7 +29,7 @@ import jsettlers.logic.map.grid.objects.MapObjectsManager;
+ public final class Rice extends GrowingObject {
+ 	private static final long serialVersionUID = 8086261556083213266L;
+ 
+-	public static final float GROWTH_DURATION = 11 * 60;
++	public static final float GROWTH_DURATION = 7 * 60; // faster than the original (11 * 60)
+ 	public static final float DECOMPOSE_DURATION = 3 * 60;
+ 	public static final float REMOVE_DURATION = 2 * 60;
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Wine.java b/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Wine.java
+index 2dba94b0c..9e82fee3f 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Wine.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Wine.java
+@@ -29,7 +29,7 @@ import jsettlers.logic.map.grid.objects.MapObjectsManager;
+ public final class Wine extends GrowingObject {
+ 	private static final long serialVersionUID = -7535441306083940418L;
+ 
+-	public static final float GROWTH_DURATION = 9 * 60;
++	public static final float GROWTH_DURATION = 6 * 60; // faster than the original (9 * 60)
+ 	public static final float DECOMPOSE_DURATION = 3 * 60;
+ 	public static final float REMOVE_DURATION = 2 * 60;
+ 

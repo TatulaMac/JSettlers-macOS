@@ -1,5 +1,5 @@
 diff --git a/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java b/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java
-index ca34e24..82fc46d 100644
+index ca34e246f..82fc46d6e 100644
 --- a/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java
 +++ b/go.graphics/src/main/java/go/graphics/text/AbstractTextDrawer.java
 @@ -49,6 +49,13 @@ public abstract class AbstractTextDrawer<T extends GLDrawContext> {
@@ -43,7 +43,7 @@ index ca34e24..82fc46d 100644
  		setupBitmapDraw();
  
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/AbstractLabels.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/AbstractLabels.java
-index 5186ba7..72cf286 100644
+index 5186ba7f3..72cf286fc 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/AbstractLabels.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/AbstractLabels.java
 @@ -17,6 +17,8 @@ package jsettlers.graphics.localization;
@@ -96,7 +96,7 @@ index 5186ba7..72cf286 100644
  
  	/**
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/Labels.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/Labels.java
-index 430954e..f3735f5 100644
+index 430954e5e..f3735f562 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/Labels.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/localization/Labels.java
 @@ -45,6 +45,14 @@ public final class Labels extends AbstractLabels {
@@ -116,12 +116,12 @@ index 430954e..f3735f5 100644
  	 * 
 diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
 new file mode 100644
-index 0000000..c7a749f
+index 000000000..85c0b1d5e
 --- /dev/null
 +++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
-@@ -0,0 +1,612 @@
+@@ -0,0 +1,614 @@
 +###############################################################################
-+# Czech translation (cestina) for the JSettlers macOS build.
++# Czech translation (čeština) for the JSettlers macOS build.
 +# Same license as the rest of the project (MIT). File encoding: UTF-8.
 +#
 +# Keep the placeholders (%s, %d, %.0f%% ...) exactly as in labels_en.properties.
@@ -500,6 +500,8 @@ index 0000000..c7a749f
 +no_soldier_available_TOWER = Vaši strážní věž nelze obsadit: není k dispozici žádný voják.
 +no_soldier_available_BIG_TOWER = Vaši velkou strážní věž nelze obsadit: není k dispozici žádný voják.
 +no_soldier_available_CASTLE = Váš hrad nelze obsadit: není k dispozici žádný voják.
++message_missing_tool = %s nelze obsadit: chybí nástroj (%s).
++message_no_free_bearer = %s nelze obsadit: není k dispozici žádný volný nosič.
 +action_firerer_slow = Pozor! Hra reaguje pomalu.
 +
 +# progress display
@@ -733,7 +735,7 @@ index 0000000..c7a749f
 +flatpak-title=Vyberte složku s originální hrou
 +flatpak-description=JSettlers ke spuštění potřebuje soubory s grafikou a zvukem z instalace Settlers 3.\nPokud kopii nevlastníte, přečtěte si README na naší stránce GitHub.\nChcete-li pokračovat, musíte nyní vybrat složku s takovou instalací.
 diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
-index 9dbf08e..58428f9 100644
+index b9e221d48..38ffeb25d 100644
 --- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
 +++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
 @@ -183,7 +183,7 @@ buildingtypes_social   = Misc. Buildings
@@ -774,7 +776,7 @@ index 9dbf08e..58428f9 100644
  cannot_find_work_WINEGROWER = Your winery can't find enough spots for growing vines in its work area.
  cannot_find_work_WATERWORKS = Your waterworks can't find any river in its work area.
  cannot_find_work_FISHER = Your fisher can't find any sea in its work area.
-@@ -400,7 +400,7 @@ movable_LUMBERJACK = Woodcutter
+@@ -402,7 +402,7 @@ movable_LUMBERJACK = Woodcutter
  movable_STONECUTTER = Stonecutter
  movable_SAWMILLER = Sawmiller
  movable_FORESTER = Forester
@@ -783,7 +785,7 @@ index 9dbf08e..58428f9 100644
  movable_MINER = Miner
  movable_FISHERMAN = Fisherman
  movable_FARMER = Farmer
-@@ -464,12 +464,17 @@ start-joining-ready = Ready
+@@ -466,12 +466,17 @@ start-joining-ready = Ready
  
  settings-title = Settings
  settings-name = Player Name
@@ -802,7 +804,7 @@ index 9dbf08e..58428f9 100644
  settings-back = Back
  settings-ok = OK
  game-menu-pause = Pause
-@@ -506,6 +511,7 @@ multiplayer-server-name = Name
+@@ -508,6 +513,7 @@ multiplayer-server-name = Name
  multiplayer-server-type = Type
  multiplayer-server-address = IP/hostname
  multiplayer-server-url = URL
@@ -810,7 +812,7 @@ index 9dbf08e..58428f9 100644
  
  multiplayer-server-cancel = Cancel
  multiplayer-server-delete = Delete
-@@ -564,7 +570,7 @@ stats-panel-name = Name
+@@ -566,7 +572,7 @@ stats-panel-name = Name
  stats-panel-team = Team
  stats-panel-manna = Manna
  stats-panel-gold = Gold
@@ -820,7 +822,7 @@ index 9dbf08e..58428f9 100644
  peace-time-WITHOUT = without
  player-type-HUMAN = Human
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/JSettlersFrame.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/JSettlersFrame.java
-index 2702913..b36a96d 100644
+index 270291357..b36a96d55 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/JSettlersFrame.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/JSettlersFrame.java
 @@ -41,6 +41,8 @@ import jsettlers.common.menu.IStartedGame;
@@ -872,7 +874,7 @@ index 2702913..b36a96d 100644
  		setNewContentPane(mainPanel);
  	}
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/mainmenu/MainMenuPanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/mainmenu/MainMenuPanel.java
-index 355b8e3..c51c984 100644
+index 355b8e36c..c51c98412 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/mainmenu/MainMenuPanel.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/mainmenu/MainMenuPanel.java
 @@ -76,6 +76,8 @@ public class MainMenuPanel extends SplitedBackgroundPanel {
@@ -915,7 +917,7 @@ index 355b8e3..c51c984 100644
  		buttonPanel.setLayout(new GridLayout(0, 1, 20, 20));
  
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/RemoteMapDirectoryPanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/RemoteMapDirectoryPanel.java
-index fbafe18..9f66f14 100644
+index fbafe181f..9f66f1498 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/RemoteMapDirectoryPanel.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/RemoteMapDirectoryPanel.java
 @@ -41,7 +41,8 @@ public class RemoteMapDirectoryPanel extends JPanel {
@@ -947,7 +949,7 @@ index fbafe18..9f66f14 100644
  			if(!currentDir.equals("/")) {
  				if (i == 0) return RETURN;
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/EMapFilter.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/EMapFilter.java
-index dd13a91..54e5078 100644
+index dd13a9180..54e507847 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/EMapFilter.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/EMapFilter.java
 @@ -56,18 +56,6 @@ public enum EMapFilter {
@@ -979,7 +981,7 @@ index dd13a91..54e5078 100644
  	}
  }
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/SearchTextField.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/SearchTextField.java
-index e74e26a..6535cbb 100644
+index e74e26aa0..6535cbbf3 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/SearchTextField.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/SearchTextField.java
 @@ -36,7 +36,7 @@ public class SearchTextField extends JTextField {
@@ -1001,7 +1003,7 @@ index e74e26a..6535cbb 100644
  	}
  }
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/settingsmenu/SettingsMenuPanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/settingsmenu/SettingsMenuPanel.java
-index 3cd777d..64fcc7a 100644
+index 3cd777d6b..64fcc7ae6 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/settingsmenu/SettingsMenuPanel.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/settingsmenu/SettingsMenuPanel.java
 @@ -19,6 +19,7 @@ import java.awt.GridLayout;
@@ -1071,7 +1073,7 @@ index 3cd777d..64fcc7a 100644
  		volumeMusicSlider.setValue((int) (settingsManager.getMusicVolume() * 100));
  		playAllMusicCheckBox.setSelected(settingsManager.isMusicPlayAll());
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/statspanel/EndgameStatsPanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/statspanel/EndgameStatsPanel.java
-index 1988dd2..298ba12 100644
+index 1988dd255..298ba121c 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/statspanel/EndgameStatsPanel.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/statspanel/EndgameStatsPanel.java
 @@ -51,7 +51,8 @@ public class EndgameStatsPanel extends BackgroundPanel {
@@ -1086,7 +1088,7 @@ index 1988dd2..298ba12 100644
  			Labels.getString("stats-panel-manna"),
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/GameLanguage.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/GameLanguage.java
 new file mode 100644
-index 0000000..1420a49
+index 000000000..1420a49b1
 --- /dev/null
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/GameLanguage.java
 @@ -0,0 +1,65 @@
@@ -1156,7 +1158,7 @@ index 0000000..1420a49
 +	}
 +}
 diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/SettingsManager.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/SettingsManager.java
-index 1b0f22c..edfaf01 100644
+index 1b0f22cfe..edfaf0158 100644
 --- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/SettingsManager.java
 +++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/settings/SettingsManager.java
 @@ -298,16 +298,26 @@ public class SettingsManager implements ISoundSettingsProvider {

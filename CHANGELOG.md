@@ -4,6 +4,46 @@ All notable changes of **JSettlers macOS** compared to upstream
 [settlers-remake](https://github.com/paulwedeck/settlers-remake) are listed here, newest version first.
 The version numbers are specific to this macOS build; upstream does not number its versions (it only shows the git commit).
 
+## [0.6.3-alpha] - HD graphics, automatic work area, smithies, messages, growth
+
+Same upstream base as before ([PR #92](https://github.com/paulwedeck/settlers-remake/pull/92), commit `47d1d4e`). New patches: `17-hd-graphics.patch`,
+`18-smithy-output.patch`, `19-auto-work-area.patch`, `20-convert-specialists-to-bearers.patch`, `21-faster-growth.patch`,
+`22-settler-messages-and-tool-demand.patch`. Changed patches: `08-in-game-messages.patch` and `12-language-selection-czech.patch` (new messages).
+
+### Added
+- **HD graphics** (patch 17): *Settings > HD graphics* (Yes/No, default No; restart needed). Units, buildings, objects, terrain and icons are enlarged 2x
+  on the player's own computer from his own game files; the result is stored in `~/Library/Application Support/JSettlers/hd` and is never distributed.
+  It uses the AI engine Real-ESRGAN ncnn Vulkan (MIT license) if it is part of the app, otherwise a built-in enlarger. The first start takes a few minutes.
+- **Smithy output** (patch 18): the panels of the tool smithy and the weapon smithy show the finished products lying at the building (icon and count per
+  kind, in extra rows of 5 icons when there are many).
+- **Automatic work area** (patch 19): lumberjacks, stonecutters, fishers, waterworks, foresters, rice farms and beekeepers move their work area to the
+  nearest work when there is nothing left to do (the lumberjack and stonecutter areas are bigger). Farms and winegrowers return to their default area, or
+  move up to twice the work radius to the side of an obstacle or of a full field. Setting the work area by hand still works. The beekeeper's work area is
+  twice as big as before.
+- **Turn thieves and geologists back into carriers** (patch 20), like the pioneers; the converted units stay selected (also for pioneers); the long texts of
+  the conversion buttons fit on the button.
+- **New messages** (patches 08, 12, 22), in English and Czech: the tool for a building is missing; no free settler is available for a building; no free
+  settler is available for arming soldiers in the barracks. The messages appear after 10 seconds and are repeated every 2 minutes while the problem lasts.
+- **Tool smithy follows the settings** (patches 18, 22): it produces shovels and hammers up to the numbers of diggers and bricklayers set in the settlers
+  settings, so it reacts whenever you raise these numbers during the game and the tools are missing in the storage (before, it worked only while a
+  construction site was waiting). It does not produce tools that are already lying at the building or in a storage.
+
+### Changed
+- **Faster growth** (patch 21): corn grows 7 minutes (was 10), wine 6 (was 9), rice 7 (was 11), beehives 60-120 s when empty and 75-120 s while growing.
+  Farmers, winegrowers, rice farmers and beekeepers pause 2 s instead of 8 s after every job. Ripe crops still rot after 3 minutes.
+- **Barracks arm soldiers only from free settlers** (patch 22): carriers reserved by the minimum carrier setting stay carriers. Before, the barracks took
+  them and the carriers were missing in the production.
+- **Harvesting has priority** (patch 19): farmers, winegrowers, rice farmers and beekeepers harvest ripe crops also in former work areas and in the default
+  area before they plant, so crops do not rot after the work area has been moved.
+- The HD notice at the first start is shorter; the window is simply closed when the enlarging is done.
+
+### Fixed
+- Missing messages: a building that could not be occupied because of a missing tool or settler stayed silent (patches 08, 12, 22). Settlers reserved as
+  carriers by the settings were counted as free, so no message appeared.
+- False "cannot find work" messages of the workers (patch 19).
+- A thief carrying nothing dropped one piece of wood when it was turned back into a carrier (patch 20).
+- Typo in the header of the Czech translation file (patch 12).
+
 ## [0.6.2-alpha] - control groups, peace time
 
 Same upstream base as before ([PR #92](https://github.com/paulwedeck/settlers-remake/pull/92), commit `47d1d4e`). New patches: `15-control-groups.patch`, `16-peacetime.patch`.
