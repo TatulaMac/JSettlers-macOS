@@ -10,8 +10,8 @@
 #
 # What the script needs: a Mac with Apple Silicon, git, JDK 17 (brew install --cask temurin@17) and an internet
 # connection (Gradle downloads the dependencies). The results are placed in:
-#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.3-alpha-arm64.dmg       (the app, this is what users download)
-#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.3-alpha-source.zip      (complete, already patched source code)
+#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.4-alpha-arm64.dmg       (the app, this is what users download)
+#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.4-alpha-source.zip      (complete, already patched source code)
 #
 # How it works: it downloads the upstream source code (https://github.com/paulwedeck/settlers-remake, the state of
 # pull request #92 "Apple Silicon support", commit 47d1d4e), applies the patches embedded below (the same patches
@@ -19,7 +19,7 @@
 #
 set -euo pipefail
 
-RELEASE_VERSION="0.6.3-alpha"   # shown in the game (window title and top right corner) and used in the file names
+RELEASE_VERSION="0.6.4-alpha"   # shown in the game (window title and top right corner) and used in the file names
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -108,6 +108,25 @@ find . -name CommitInfo.java -path "*generated*" -delete   # make sure the label
 # 22 "No free settler" messages also appear when carriers are reserved by the minimum carrier setting and for barracks (arming);
 #    barracks only arm free settlers, never carriers reserved by the minimum carrier setting;
 #    the tool smithy also produces shovels and hammers up to the digger/bricklayer numbers set in the settings.
+# 23 Lobby (single player, LAN host/client): selectable player colors (new last column "Color", sent over the network, used in the game);
+#    the preview map shows the numbers of the map slots (positions) at the real start points. Changes the network protocol (version 0.6.4+ only).
+# (18 also: buildings with 4-5 material buttons, e.g. the Amazon laboratory, get evenly spaced buttons that no longer overlap.)
+# (19 also: the winegrower moves its work area over the whole allowed range, because vines grow only on slopes.)
+# 24 LAN: new tab "Load game" next to "New match": the host continues a saved game (single player and multiplayer saves are interchangeable).
+#    Position, nation and team are fixed by the save, human/computer type can be changed. Every player needs the same save file; a player
+#    who misses it gets a message instead of joining. The network clock counts lockstep steps from the saved game time.
+# 25 EXPERIMENTAL, LAN only: human players that choose the same color and the same nation play together as ONE player (shared position,
+#    shown with the same position number in the lobby). Remove this patch from PATCH_NAMES if it causes trouble.
+# (22 also: requests of destroyed or conquered buildings are dropped, so there are no more "no free settler" messages about a ruin.)
+# 26 Saving: the message "Game saved." is shown; the list of games shows date AND time of the save; the id of a saved game is the same on all
+#    computers of a LAN game (every computer saves when one player saves), so each player can load the save from his own folder.
+#    A saved game also remembers the colors of the players (new saves only) and restores them when it is loaded.
+# 27 In-game chat for network games: press Enter (or click the chat button of the minimap) to write a message, Enter sends it, Escape cancels.
+#    The message is shown to all players with the name and in the color of the sender.
+# 28 Network lobby: the guests see the peace time the host selects;
+#    the settings of the new-game window (players, resources, peace time) are centered on the same line as their labels;
+#    fixes a saved game that was loaded into a LAN game: the clock reported the saved game time to the server while the game was loading, so
+#    the server stopped waiting for the players and their commands were executed with a huge delay.
 say "Applying the patches"
 mkdir -p "$WORK/patches"
 cat > "$WORK/patches/01-lan-multiplayer-broadcast.patch" <<'PATCH_EOF'
@@ -6123,7 +6142,7 @@ index edfaf0158..792a0b955 100644
 PATCH_EOF
 cat > "$WORK/patches/18-smithy-output.patch" <<'PATCH_EOF'
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
-index 0eb7c83a2..5dab815c0 100644
+index 0eb7c83a2..12ed49ef6 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
 @@ -20,6 +20,7 @@ import java.util.Optional;
@@ -6134,7 +6153,7 @@ index 0eb7c83a2..5dab815c0 100644
  import jsettlers.common.buildings.IBuilding;
  import jsettlers.common.images.EImageLinkType;
  import jsettlers.common.images.ImageLink;
-@@ -400,21 +401,52 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+@@ -400,21 +401,54 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
  		}
  	}
  
@@ -6151,15 +6170,17 @@ index 0eb7c83a2..5dab815c0 100644
 +
 +		// The tool and weapon smithies can have many different products lying at the building. Up to 5 buttons stay in one row (with a smaller
 +		// gap if needed). With more, the first row moves up and the rest is placed in rows below it, the last row at the original position.
++		// Other buildings with 4 or 5 stacks (e.g. the laboratory of the Amazons: 2 requested and 2 offered materials) get the smaller gap too,
++		// otherwise the buttons of the requested and the offered materials overlap.
 +		boolean smithy = building.getBuildingVariant().getType() == EBuildingType.TOOLSMITH
 +				|| building.getBuildingVariant().getType() == EBuildingType.WEAPONSMITH;
 +		int perRow = Integer.MAX_VALUE;
 +		if (smithy) {
 +			perRow = SMITHY_BUTTONS_PER_ROW;
-+			if (stacks.size() > 3) {
-+				int inRow = Math.min(stacks.size(), perRow);
-+				buttonSpace = (1 - inRow * buttonWidth) / (inRow + 1);
-+			}
++		}
++		if (stacks.size() > 3 && (smithy || stacks.size() <= SMITHY_BUTTONS_PER_ROW)) {
++			int inRow = Math.min(stacks.size(), SMITHY_BUTTONS_PER_ROW);
++			buttonSpace = (1 - inRow * buttonWidth) / (inRow + 1);
 +		}
 +		int rows = Math.max(1, (stacks.size() + perRow - 1) / perRow);
 +		float rowStep = 1 + SMITHY_ROW_GAP;
@@ -6294,7 +6315,7 @@ index d7e8a6f9c..424a393ae 100644
  
  	BuildingVariant getBuildingVariant();
 diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java
-index 1d83319e6..9ab37f238 100644
+index 1d83319e6..b7fd2c587 100644
 --- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java
 +++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java
 @@ -5,6 +5,8 @@ import jsettlers.algorithms.simplebehaviortree.IEMaterialTypeSupplier;
@@ -6404,7 +6425,7 @@ index 1d83319e6..9ab37f238 100644
  							mov.building.setCannotWork(true);
  							mov.player.showMessage(SimpleMessage.cannotFindWork(mov.building));
  						}
-@@ -308,6 +371,146 @@ public class BuildingWorkerMovable extends CivilianMovable implements IBuildingW
+@@ -308,6 +371,155 @@ public class BuildingWorkerMovable extends CivilianMovable implements IBuildingW
  		);
  	}
  
@@ -6443,7 +6464,8 @@ index 1d83319e6..9ab37f238 100644
 +	 * <li>Rice: the area follows the nearest swamp that can be planted or harvested within three times the work radius.</li>
 +	 * <li>Bees: like rice, the area follows the nearest place for a hive (grass next to a tree) within twice the work radius.</li>
 +	 * <li>Corn and wine (they work around the building): the area returns to the default center if there is work, otherwise it moves a bit to the
-+	 * side, up to twice the work radius from the default center.</li>
++	 * side, up to twice the work radius from the default center. Vines can only be planted on slopes, so the winegrower
++	 * searches the whole range that is allowed for a work area (almost four work radii from the building).</li>
 +	 * </ul>
 +	 *
 +	 * @param searchType
@@ -6501,8 +6523,6 @@ index 1d83319e6..9ab37f238 100644
 +			break;
 +		case CUTTABLE_CORN:
 +		case PLANTABLE_CORN:
-+		case HARVESTABLE_WINE:
-+		case PLANTABLE_WINE:
 +			// work around the building: go back to the default center if there is something to do there, otherwise move the area a bit
 +			// to the side (e.g. if the default area is blocked by a building)
 +			if (onlyBigAreas) {
@@ -6512,6 +6532,16 @@ index 1d83319e6..9ab37f238 100644
 +			limitCenter = home;
 +			searchRadius = 2 * radius;
 +			maxDistance = 2 * radius; // measured from the default center, because that is already some way from the building
++			break;
++		case HARVESTABLE_WINE:
++		case PLANTABLE_WINE:
++			// like corn, but vines can only be planted on slopes, which are rare, so the whole range that is allowed for a work area is searched
++			if (onlyBigAreas) {
++				return false;
++			}
++			homeFirst = true;
++			searchRadius = 4 * radius;
++			maxDistance = 4 * radius - 1; // measured from the building; a work area must be closer than 4 work radii to its building
 +			break;
 +		default:
 +			return false;
@@ -7137,7 +7167,7 @@ index 3aaa34bf2..6333ecca8 100644
  			return buildingNameOf(label.substring("cannot_find_work_".length())) + ": no work found in its work area.";
  		} else if (label.startsWith("no_soldier_available_")) {
 diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
-index ba7c4b285..58ad179d7 100644
+index be81af342..c65076796 100644
 --- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
 +++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
 @@ -379,7 +379,8 @@ no_soldier_available_TOWER = Vaši strážní věž nelze obsadit: není k dispo
@@ -7212,11 +7242,35 @@ index ee2287608..7045270c8 100644
  	@Override
  	public void bearerRequestFailed() {
  		super.grid.requestSoldierable(this);
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
+index 3b73e13d5..4a35703a3 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
+@@ -189,6 +189,9 @@ public class OccupyingBuilding extends Building implements IBuilding.IOccupied,
+ 	 * Tells the player when this building has been waiting for its first soldier for a long time (nobody in reach to occupy it).
+ 	 */
+ 	private void warnIfNoSoldierAvailable() {
++		if (isDestroyed()) {
++			return;
++		}
+ 		if (sortedOccupiers.isEmpty() && comingSoldiers.isEmpty() && !searchedSoldiers.isEmpty()) {
+ 			unoccupiedTicks++;
+ 			if (unoccupiedTicks == NO_SOLDIER_WARNING_TICKS
 diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
-index fd332444d..c11854a00 100644
+index fd332444d..041fcd03b 100644
 --- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
 +++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
-@@ -315,10 +315,15 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+@@ -293,6 +293,9 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 
+ 	private void handleWorkerRequest() {
+ 		WorkerRequest workerRequest = workerRequests.poll();
++		if (workerRequest != null && !workerRequest.isRequestAlive()) {
++			return; // the building does not exist any more: forget the request
++		}
+ 		if (workerRequest != null) {
+ 			IManageableWorker worker = joblessWorkers.removeObjectNextTo(workerRequest.getPosition(), currentWorker -> currentWorker.getMovableType() == workerRequest.movableType);
+ 
+@@ -315,10 +318,15 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
  	private void handleWorkerCreationRequests() {
  		Iterator<WorkerCreationRequest> iterator = workerCreationRequests.iterator();
  
@@ -7236,9 +7290,13 @@ index fd332444d..c11854a00 100644
  					WorkerRequest workerRequest = (WorkerRequest) request;
  					workerRequest.warnPlayer(SimpleMessage.noFreeBearer(workerRequest.building));
  				}
-@@ -382,13 +387,32 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+@@ -381,14 +389,36 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 
  	private void handleSoldierCreationRequest() {
  		SoldierCreationRequest soilderRequest = soldierCreationRequests.poll();
++		if (soilderRequest != null && soilderRequest.getBarrack().isDestroyed()) {
++			return; // the barrack does not exist any more: forget the request, so there are no more messages about it
++		}
  		if (soilderRequest != null) {
 -			IManageableBearer manageableBearer = joblessBearer.removeObjectNextTo(soilderRequest.getPosition());
 -			if (manageableBearer == null || !manageableBearer.becomeSoldier(soilderRequest.getBarrack())) {
@@ -7271,7 +7329,7 @@ index fd332444d..c11854a00 100644
  	private void handleDiggerRequest() {
  		DiggerRequest request = diggerRequests.peek();
  		if (request == null) {
-@@ -463,6 +487,37 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+@@ -463,6 +493,37 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
  			}
  		}
  
@@ -7339,10 +7397,10 @@ index 05b6fd0d1..b875c3158 100644
  	}
  }
 diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java
-index ffefc09c4..896d7ce71 100644
+index ffefc09c4..8721f637f 100644
 --- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java
 +++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java
-@@ -49,4 +49,15 @@ public interface IBarrack extends ILocatable {
+@@ -49,4 +49,20 @@ public interface IBarrack extends ILocatable {
  	 * @return Returns the position where the newly created soldier should walk.
  	 */
  	ShortPoint2D getSoldierTargetPosition();
@@ -7357,6 +7415,11 @@ index ffefc09c4..896d7ce71 100644
 +	 * Called when a free settler has been found, so the next shortage is announced again after the usual delay.
 +	 */
 +	void clearNoFreeSettlerWarning();
++
++	/**
++	 * @return True if the barrack does not exist any more (it was destroyed or conquered). Requests of such a barrack are dropped.
++	 */
++	boolean isDestroyed();
  }
 diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BearerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BearerMovable.java
 index 836b7a918..ebc3d4a9e 100644
@@ -7411,7 +7474,3420 @@ index 836b7a918..ebc3d4a9e 100644
  		registered = false;
  		return true;
 PATCH_EOF
-PATCH_NAMES="01-lan-multiplayer-broadcast 02-endgame-player-names 03-gifts-of-the-gods-spell 04-soldiers-ignore-far-civilians 05-font-quality-and-size 06-building-cost-tooltip 07-tooltip-position 08-in-game-messages 09-messages-layout-and-settings-file 10-game-speed-and-fps-limit 11-amazon-storage-shadow 12-language-selection-czech 13-thief-fixes 14-zoom-indicator 15-control-groups 16-peacetime 17-hd-graphics 18-smithy-output 19-auto-work-area 20-convert-specialists-to-bearers 21-faster-growth 22-settler-messages-and-tool-demand"
+cat > "$WORK/patches/23-lobby-colors-and-positions.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java b/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java
+index bde71ea79..063e0efe9 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java
+@@ -63,6 +63,12 @@ public interface IJoinPhaseMultiplayerGameConnector {
+ 
+ 	void setTeam(byte slot, byte team);
+ 
++	/**
++	 * Sets the color of a slot (index of the color table, see {@link jsettlers.common.player.PlayerColors}).
++	 */
++	default void setColor(byte slot, byte color) {
++	}
++
+ 	void setPlayerCount(int playerCount);
+ 
+ 	/**
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/IMultiplayerSlot.java b/jsettlers.common/src/main/java/jsettlers/common/menu/IMultiplayerSlot.java
+index 6bede4976..2a9a7d77c 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/IMultiplayerSlot.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/IMultiplayerSlot.java
+@@ -13,4 +13,11 @@ public interface IMultiplayerSlot {
+ 	byte getTeam();
+ 
+ 	byte getPosition();
++
++	/**
++	 * @return The index of the color chosen for this slot (see {@link jsettlers.common.player.PlayerColors}).
++	 */
++	default byte getColor() {
++		return getPosition();
++	}
+ }
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java b/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java
+new file mode 100644
+index 000000000..f887f45d1
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java
+@@ -0,0 +1,59 @@
++package jsettlers.common.player;
++
++/**
++ * Holds the colors the players have chosen for the game that is running or starting. A color is the index of an entry of the player color
++ * table of the graphics. Without a choice, the color of a player is given by his player id (the position on the map).
++ */
++public final class PlayerColors {
++
++	/** Number of colors a player can choose from (the colors of the original game). */
++	public static final int SELECTABLE_COLORS = 20;
++
++	private static volatile byte[] colorIndexByPlayerId = null;
++
++	private PlayerColors() {
++	}
++
++	/**
++	 * Sets the colors for the next game.
++	 *
++	 * @param colorIndexByPlayerId
++	 * 		The index of the color for every player id (position on the map) or <code>null</code> for the default colors.
++	 */
++	public static void set(byte[] colorIndexByPlayerId) {
++		PlayerColors.colorIndexByPlayerId = colorIndexByPlayerId == null ? null : colorIndexByPlayerId.clone();
++	}
++
++	private static volatile byte[] preparedColors = null;
++
++	/**
++	 * Prepares the colors of the game that is started next. They become active when the game object is created ({@link #applyPrepared()}).
++	 * Games that are started without preparing colors (saved games, replays) use the default colors.
++	 */
++	public static void prepareNextGame(byte[] colorIndexByPlayerId) {
++		preparedColors = colorIndexByPlayerId == null ? null : colorIndexByPlayerId.clone();
++	}
++
++	/**
++	 * Makes the prepared colors the colors of the running game.
++	 */
++	public static void applyPrepared() {
++		set(preparedColors);
++		preparedColors = null;
++	}
++
++	public static void reset() {
++		colorIndexByPlayerId = null;
++	}
++
++	/**
++	 * @return The index of the color of the given player.
++	 */
++	public static int getColorIndex(byte playerId) {
++		byte[] colors = colorIndexByPlayerId;
++		if (colors != null && playerId >= 0 && playerId < colors.length) {
++			return colors[playerId];
++		}
++		return playerId;
++	}
++}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapDrawContext.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapDrawContext.java
+index 29c237ac0..3674dcf51 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapDrawContext.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapDrawContext.java
+@@ -242,7 +242,18 @@ public final class MapDrawContext implements IGLProvider {
+ 	}
+ 
+ 	/**
+-	 * Gets the color for a given player.
++	 * Gets an entry of the player color table.
++	 *
++	 * @param colorIndex
++	 *            The index of the color.
++	 * @return The color.
++	 */
++	public static Color getSelectableColor(int colorIndex) {
++		return PLAYER_COLORS[Math.abs(colorIndex) % PLAYER_COLORS.length];
++	}
++
++	/**
++	 * Gets the color for a given player, taking the colors chosen in the lobby into account.
+ 	 *
+ 	 * @param player
+ 	 *            The player to get the color for.
+@@ -250,7 +261,7 @@ public final class MapDrawContext implements IGLProvider {
+ 	 */
+ 	public static Color getPlayerColor(byte player) {
+ 		if (player >= 0) {
+-			return PLAYER_COLORS[player % PLAYER_COLORS.length];
++			return PLAYER_COLORS[Math.abs(jsettlers.common.player.PlayerColors.getColorIndex(player)) % PLAYER_COLORS.length];
+ 		} else {
+ 			return Color.BLACK;
+ 		}
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index c65076796..9b240e8b8 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -562,6 +562,7 @@ join-game-panel-civilisation = Národ
+ join-game-panel-player-type = Typ
+ join-game-panel-map-slot = Pozice
+ join-game-panel-team = Tým
++join-game-panel-color = Barva
+ join-game-panel-send-chat-message = Odeslat
+ 
+ stats-panel-exit = Další
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index ba8046ff8..5587dd15b 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -568,6 +568,7 @@ join-game-panel-civilisation = Civilisation
+ join-game-panel-player-type = Type
+ join-game-panel-map-slot = Position
+ join-game-panel-team = Team
++join-game-panel-color = Color
+ join-game-panel-send-chat-message = Send
+ 
+ stats-panel-exit = Next
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+index ae5133d7f..f856bfc11 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+@@ -100,6 +100,7 @@ public class JSettlersGame {
+ 			boolean controlAll, boolean multiplayer, DataInputStream replayFileInputStream) {
+ 		configureLogging(mapCreator);
+ 
++		jsettlers.common.player.PlayerColors.applyPrepared();
+ 		this.initialGameState = initialGameState;
+ 
+ 		System.out.println("OS version: " + System.getProperty("os.name") + " " + System.getProperty("os.arch") + " "
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+index 495109732..57672463b 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+@@ -135,6 +135,7 @@ public class MultiplayerGame {
+ 			MapLoader mapLoader = MapList.getDefaultList().getMapById(packet.getMatchInfo().getMapInfo().getId());
+ 			long randomSeed = packet.getRandomSeed();
+ 			PlayerSetting[] playerSettings = determinePlayerSettings();
++			jsettlers.common.player.PlayerColors.prepareNextGame(determinePlayerColors());
+ 			byte ownPlayerId = calculateOwnPlayerId();
+ 			// TODO start resources
+ 			InitialGameState initialGameState = new InitialGameState(ownPlayerId, playerSettings, randomSeed);
+@@ -160,6 +161,19 @@ public class MultiplayerGame {
+ 		return IntStream.range(0, maxPlayers).mapToObj(i -> playerSettings.computeIfAbsent((byte) i, v -> new PlayerSetting())).toArray(PlayerSetting[]::new);
+ 	}
+ 
++	private byte[] determinePlayerColors() {
++		byte[] colors = new byte[Math.max(maxPlayers, 1)];
++		for (int i = 0; i < colors.length; i++) {
++			colors[i] = (byte) i;
++		}
++		for (IMultiplayerSlot slot : slotList.getItems()) {
++			if (slot.getPosition() >= 0 && slot.getPosition() < colors.length) {
++				colors[slot.getPosition()] = slot.getColor();
++			}
++		}
++		return colors;
++	}
++
+ 	private static String playerNameOf(IMultiplayerSlot slot) {
+ 		return slot.getPlayer() != null ? slot.getPlayer().getName() : null;
+ 	}
+@@ -272,6 +286,11 @@ public class MultiplayerGame {
+ 				networkClient.setTeam(slot, team);
+ 			}
+ 
++			@Override
++			public void setColor(byte slot, byte color) {
++				networkClient.setColor(slot, color);
++			}
++
+ 			@Override
+ 			public void setType(byte slot, EPlayerType playerType) {
+ 				networkClient.setType(slot, (byte) playerType.ordinal());
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/datatypes/MultiplayerSlot.java b/jsettlers.logic/src/main/java/jsettlers/main/datatypes/MultiplayerSlot.java
+index ec9b152f9..abab75a71 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/datatypes/MultiplayerSlot.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/datatypes/MultiplayerSlot.java
+@@ -13,6 +13,7 @@ public class MultiplayerSlot implements IMultiplayerSlot {
+ 	private final ECivilisation civilisation;
+ 	private final byte team;
+ 	private final byte position;
++	private final byte color;
+ 
+ 
+ 	public MultiplayerSlot(SlotInfoPacket packet) {
+@@ -23,6 +24,7 @@ public class MultiplayerSlot implements IMultiplayerSlot {
+ 		this.player = player;
+ 		this.team = packet.getTeam();
+ 		this.position = packet.getPosition();
++		this.color = packet.getColor();
+ 		this.civilisation = getCivilisation(packet.getCivilisation());
+ 		this.type = getPlayerType(packet.getPlayerType());
+ 	}
+@@ -67,4 +69,9 @@ public class MultiplayerSlot implements IMultiplayerSlot {
+ 	public byte getPosition() {
+ 		return position;
+ 	}
++
++	@Override
++	public byte getColor() {
++		return color;
++	}
+ }
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index 7047f90a0..748d105ff 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -14,7 +14,14 @@
+  *******************************************************************************/
+ package jsettlers.main.swing.menu.joinpanel;
+ 
++import java.awt.BasicStroke;
+ import java.awt.BorderLayout;
++import java.awt.Color;
++import java.awt.Font;
++import java.awt.FontMetrics;
++import java.awt.Graphics2D;
++import java.awt.RenderingHints;
++import java.awt.image.BufferedImage;
+ import java.awt.FlowLayout;
+ import java.awt.GridBagConstraints;
+ import java.awt.GridBagLayout;
+@@ -50,10 +57,15 @@ import jsettlers.common.menu.IMultiplayerListener;
+ import jsettlers.common.menu.IMultiplayerPlayer;
+ import jsettlers.common.menu.IMultiplayerSlot;
+ import jsettlers.common.menu.IStartingGame;
++import jsettlers.common.player.PlayerColors;
+ import jsettlers.common.utils.collections.ChangingList;
+ import jsettlers.graphics.localization.Labels;
+ import jsettlers.logic.map.loading.EMapStartResources;
++import jsettlers.graphics.map.MapDrawContext;
+ import jsettlers.logic.map.loading.MapLoader;
++import jsettlers.logic.map.loading.data.IMapData;
++import jsettlers.logic.map.loading.newmap.MapFileHeader;
++import jsettlers.common.position.ShortPoint2D;
+ import jsettlers.logic.player.InitialGameState;
+ import jsettlers.logic.player.PlayerSetting;
+ import jsettlers.main.JSettlersGame;
+@@ -108,12 +120,18 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	private final JLabel slotsHeadlineType = new JLabel();
+ 	private final JLabel slotsHeadlineMapSlot = new JLabel();
+ 	private final JLabel slotsHeadlineTeam = new JLabel();
++	private final JLabel slotsHeadlineColor = new JLabel();
+ 	private final JTextField chatInputField = new JTextField();
+ 	private final JTextArea chatArea = new JTextArea();
+ 	private final JButton sendChatMessageButton = new JButton();
+ 	private MapLoader mapLoader;
+ 	private final List<PlayerSlot> playerSlots = new ArrayList<>();
+ 	private IPlayerSlotFactory playerSlotFactory;
++	/** The preview image of the map without any decoration. */
++	private BufferedImage previewBase;
++	/** Positions of the start points in the preview image (index = position on the map), <code>null</code> as long as they are unknown. */
++	private int[][] previewStartPoints;
++	private Thread previewStartPointsThread;
+ 
+ 	public JoinGamePanel(JSettlersFrame settlersFrame) {
+ 		this.settlersFrame = settlersFrame;
+@@ -190,6 +208,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		slotsHeadlineType.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_DYNAMIC);
+ 		slotsHeadlineMapSlot.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_DYNAMIC);
+ 		slotsHeadlineTeam.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_DYNAMIC);
++		slotsHeadlineColor.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_DYNAMIC);
+ 		sendChatMessageButton.putClientProperty(ELFStyle.KEY, ELFStyle.BUTTON_MENU);
+ 		chatInputField.putClientProperty(ELFStyle.KEY, ELFStyle.TEXT_DEFAULT);
+ 		chatArea.putClientProperty(ELFStyle.KEY, ELFStyle.PANEL_DARK);
+@@ -211,6 +230,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		slotsHeadlineType.setText(Labels.getString("join-game-panel-player-type"));
+ 		slotsHeadlineMapSlot.setText(Labels.getString("join-game-panel-map-slot"));
+ 		slotsHeadlineTeam.setText(Labels.getString("join-game-panel-team"));
++		slotsHeadlineColor.setText(Labels.getString("join-game-panel-color"));
+ 		sendChatMessageButton.setText(Labels.getString("join-game-panel-send-chat-message"));
+ 	}
+ 
+@@ -236,6 +256,8 @@ public class JoinGamePanel extends BackgroundPanel {
+ 					})
+ 					.toArray(PlayerSetting[]::new);
+ 
++			waitForPreviewStartPoints();
++			PlayerColors.prepareNextGame(determinePlayerColors());
+ 			MapStartResourcesUIWrapper selected = (MapStartResourcesUIWrapper) startResourcesComboBox.getSelectedItem();
+ 			InitialGameState initialGameState = new InitialGameState(playerSlots.get(0).getSlot(), playerSettings, randomSeed, selected.getStartResources());
+ 			applySelectedPeaceTime();
+@@ -272,6 +294,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 					initializeChatFor(connector);
+ 					setStartButtonActionListener(e -> {
+ 						applySelectedPeaceTime();
++						waitForPreviewStartPoints();
+ 						connector.startGame();
+ 					});
+ 					connector.getSlots().setListener(changingSlots -> onSlotsChanged(changingSlots, connector, myId, true));
+@@ -374,6 +397,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 				IMultiplayerSlot remoteSlot = slots.next();
+ 				playerSlot.setCivilisation(remoteSlot.getCivilisation(), false);
+ 				playerSlot.setTeam(remoteSlot.getTeam(), false);
++				playerSlot.setColor(remoteSlot.getColor(), false);
+ 				playerSlot.setSlot(remoteSlot.getPosition(), false);
+ 				IMultiplayerPlayer player = remoteSlot.getPlayer();
+ 				playerSlot.setPlayerType(remoteSlot.getType(), false);
+@@ -414,7 +438,9 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	private void prepareUiFor(MapLoader mapLoader) {
+ 		this.mapLoader = mapLoader;
+ 		mapNameLabel.setText(mapLoader.getMapName());
+-		mapImage.setIcon(new ImageIcon(JSettlersSwingUtil.createBufferedImageFrom(mapLoader)));
++		previewBase = JSettlersSwingUtil.createBufferedImageFrom(mapLoader);
++		previewStartPoints = null;
++		mapImage.setIcon(new ImageIcon(previewBase));
+ 		peaceTimeComboBox.removeAllItems();
+ 		for (EPeaceTime peaceTime : EPeaceTime.values()) {
+ 			peaceTimeComboBox.addItem(peaceTime);
+@@ -428,6 +454,119 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		numberOfPlayersComboBox.reset(mapLoader.getMaxPlayers());
+ 		buildPlayerSlots();
+ 		updateNumberOfPlayerSlots(mapLoader.getMaxPlayers());
++		loadPreviewStartPoints(mapLoader);
++	}
++
++	/**
++	 * Determines the color of every player id (position on the map) from the color selection of the slots.
++	 */
++	private byte[] determinePlayerColors() {
++		byte[] colors = new byte[Math.max(mapLoader.getMaxPlayers(), 1)];
++		for (int i = 0; i < colors.length; i++) {
++			colors[i] = (byte) i;
++		}
++		for (PlayerSlot playerSlot : playerSlots) {
++			if (playerSlot.isAvailable() && playerSlot.getSlot() >= 0 && playerSlot.getSlot() < colors.length) {
++				colors[playerSlot.getSlot()] = playerSlot.getColor();
++			}
++		}
++		return colors;
++	}
++
++	/**
++	 * Reads the start points of the map in the background to show the numbers of the map slots in the preview image.
++	 */
++	private void loadPreviewStartPoints(MapLoader loader) {
++		Thread thread = new Thread(() -> {
++			try {
++				IMapData mapData = loader.getMapData();
++				int maxPlayers = loader.getMaxPlayers();
++				int size = MapFileHeader.PREVIEW_IMAGE_SIZE;
++				int[][] points = new int[maxPlayers][];
++				for (int i = 0; i < maxPlayers; i++) {
++					ShortPoint2D start = mapData.getStartPoint(i);
++					if (start == null) {
++						continue;
++					}
++					int px = Math.min(Math.max((int) ((double) start.x / mapData.getWidth() * size), 0), size - 1);
++					int py = Math.min(Math.max((int) ((double) start.y / mapData.getHeight() * size), 0), size - 1);
++					// same skew as JSettlersSwingUtil.createBufferedImageFrom()
++					int xOffset = Math.max(size - 1 - (py + 1) / 2, 1);
++					points[i] = new int[] { px + xOffset, py };
++				}
++				SwingUtilities.invokeLater(() -> {
++					if (mapLoader == loader) {
++						previewStartPoints = points;
++						refreshPreview();
++					}
++				});
++			} catch (Throwable t) {
++				// no numbers in the preview: maps that can't supply their start points (saved games)
++			}
++		}, "previewStartPoints");
++		thread.setDaemon(true);
++		previewStartPointsThread = thread;
++		thread.start();
++	}
++
++	/**
++	 * The start points are read with the same map loader that is used to start the game, so wait until the reading is finished.
++	 */
++	private void waitForPreviewStartPoints() {
++		Thread thread = previewStartPointsThread;
++		if (thread != null && thread.isAlive()) {
++			try {
++				thread.join(10000);
++			} catch (InterruptedException e) {
++				Thread.currentThread().interrupt();
++			}
++		}
++	}
++
++	/**
++	 * Draws the numbers of the map slots at the start points into the preview image, in the color chosen for the player of the slot.
++	 */
++	private void refreshPreview() {
++		if (previewBase == null) {
++			return;
++		}
++		int[][] points = previewStartPoints;
++		if (points == null) {
++			return;
++		}
++		BufferedImage image = new BufferedImage(previewBase.getWidth(), previewBase.getHeight(), BufferedImage.TYPE_INT_ARGB);
++		Graphics2D g = image.createGraphics();
++		g.drawImage(previewBase, 0, 0, null);
++		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
++		g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
++		g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 11));
++		FontMetrics metrics = g.getFontMetrics();
++		int radius = 8;
++
++		for (PlayerSlot playerSlot : playerSlots) {
++			if (!playerSlot.isAvailable()) {
++				continue;
++			}
++			int position = playerSlot.getSlot();
++			if (position < 0 || position >= points.length || points[position] == null) {
++				continue;
++			}
++			int cx = points[position][0];
++			int cy = points[position][1];
++			jsettlers.common.Color color = MapDrawContext.getSelectableColor(playerSlot.getColor());
++			g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue()));
++			g.fillOval(cx - radius, cy - radius, 2 * radius, 2 * radius);
++			g.setColor(Color.WHITE);
++			g.setStroke(new BasicStroke(1.5f));
++			g.drawOval(cx - radius, cy - radius, 2 * radius, 2 * radius);
++
++			String text = String.valueOf(position + 1);
++			double brightness = 0.299 * color.getRed() + 0.587 * color.getGreen() + 0.114 * color.getBlue();
++			g.setColor(brightness > 0.6 ? Color.BLACK : Color.WHITE);
++			g.drawString(text, cx - metrics.stringWidth(text) / 2, cy + (metrics.getAscent() - metrics.getDescent()) / 2);
++		}
++		g.dispose();
++		mapImage.setIcon(new ImageIcon(image));
+ 	}
+ 
+ 	private void buildPlayerSlots() {
+@@ -444,6 +583,8 @@ public class JoinGamePanel extends BackgroundPanel {
+ 			PlayerSetting playerSetting = playerSettings[i];
+ 
+ 			playerSlot.setSlot(i, true);
++			playerSlot.setColor(i, true);
++			playerSlot.setPreviewListener(this::refreshPreview);
+ 
+ 			if (playerSetting.getTeamId() != null) {
+ 				playerSlot.setTeam(playerSetting.getTeamId(), true);
+@@ -492,6 +633,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		SwingUtilities.updateComponentTreeUI(playerSlotsPanel);
+ 		SlotToggleGroup slotToggleGroup = new SlotToggleGroup();
+ 		playerSlots.forEach(slotToggleGroup::add);
++		refreshPreview();
+ 	}
+ 
+ 	private void addPlayerSlotHeadline() {
+@@ -524,6 +666,12 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		constraints.gridwidth = 1;
+ 		constraints.fill = GridBagConstraints.HORIZONTAL;
+ 		playerSlotsPanel.add(slotsHeadlineTeam, constraints);
++		constraints = new GridBagConstraints();
++		constraints.gridx = 13;
++		constraints.gridy = 0;
++		constraints.gridwidth = 1;
++		constraints.fill = GridBagConstraints.HORIZONTAL;
++		playerSlotsPanel.add(slotsHeadlineColor, constraints);
+ 	}
+ 
+ 	private enum EPeaceTime {
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/ColorUiWrapper.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/ColorUiWrapper.java
+new file mode 100644
+index 000000000..fa7a0f666
+--- /dev/null
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/ColorUiWrapper.java
+@@ -0,0 +1,29 @@
++package jsettlers.main.swing.menu.joinpanel.slots;
++
++import jsettlers.common.Color;
++import jsettlers.graphics.map.MapDrawContext;
++
++/**
++ * An entry of the color selection of a player slot: a colored bar and the number of the color.
++ */
++public class ColorUiWrapper {
++
++	private final int colorIndex;
++	private final String text;
++
++	public ColorUiWrapper(int colorIndex) {
++		this.colorIndex = colorIndex;
++		Color color = MapDrawContext.getSelectableColor(colorIndex);
++		int rgb = ((int) (color.getRed() * 255) << 16) | ((int) (color.getGreen() * 255) << 8) | (int) (color.getBlue() * 255);
++		this.text = String.format("<html><font color=\"#%06x\">\u25A0\u25A0\u25A0\u25A0</font> %d</html>", rgb, colorIndex + 1);
++	}
++
++	public int getColorIndex() {
++		return colorIndex;
++	}
++
++	@Override
++	public String toString() {
++		return text;
++	}
++}
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+index c1b62582a..2528976f7 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+@@ -17,6 +17,7 @@ package jsettlers.main.swing.menu.joinpanel.slots;
+ import jsettlers.common.ai.EPlayerType;
+ import jsettlers.common.menu.IJoinPhaseMultiplayerGameConnector;
+ import jsettlers.common.player.ECivilisation;
++import jsettlers.common.player.PlayerColors;
+ import jsettlers.graphics.image.SingleImage;
+ import jsettlers.graphics.localization.Labels;
+ import jsettlers.graphics.map.draw.ImageProvider;
+@@ -53,6 +54,7 @@ public class PlayerSlot {
+ 	private final JComboBox<PlayerTypeUiWrapper> typeComboBox = new JComboBox<>();
+ 	private final JComboBox<Byte> slotComboBox = new JComboBox<>();
+ 	private final JComboBox<Byte> teamComboBox = new JComboBox<>();
++	private final JComboBox<ColorUiWrapper> colorComboBox = new JComboBox<>();
+ 	private final JButton readyButton = new JButton();
+ 	private byte oldSlotValue;
+ 	private ISlotListener slotListener;
+@@ -66,6 +68,8 @@ public class PlayerSlot {
+ 	private EPlayerType playerType;
+ 	private byte team;
+ 	private byte slot;
++	private byte color;
++	private Runnable previewListener;
+ 
+ 	public PlayerSlot(byte index) {
+ 		this.index = index;
+@@ -111,6 +115,12 @@ public class PlayerSlot {
+ 		constraints.gridwidth = 1;
+ 		constraints.fill = GridBagConstraints.HORIZONTAL;
+ 		panel.add(teamComboBox, constraints);
++		constraints = new GridBagConstraints();
++		constraints.gridx = 13;
++		constraints.gridy = row + 1;
++		constraints.gridwidth = 1;
++		constraints.fill = GridBagConstraints.HORIZONTAL;
++		panel.add(colorComboBox, constraints);
+ 	}
+ 
+ 	private void setStyle() {
+@@ -120,6 +130,7 @@ public class PlayerSlot {
+ 		readyButton.setMinimumSize(new Dimension(READY_BUTTON_WIDTH, READY_BUTTON_HEIGHT));
+ 		playerNameLabel.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_DYNAMIC);
+ 		teamComboBox.putClientProperty(ELFStyle.KEY, ELFStyle.COMBOBOX);
++		colorComboBox.putClientProperty(ELFStyle.KEY, ELFStyle.COMBOBOX);
+ 		slotComboBox.putClientProperty(ELFStyle.KEY, ELFStyle.COMBOBOX);
+ 		typeComboBox.putClientProperty(ELFStyle.KEY, ELFStyle.COMBOBOX);
+ 		civilisationComboBox.putClientProperty(ELFStyle.KEY, ELFStyle.COMBOBOX);
+@@ -179,6 +190,15 @@ public class PlayerSlot {
+ 				slot = newSlot;
+ 			}
+ 		});
++		colorComboBox.addActionListener(e -> {
++			byte newColor = getColor();
++			if (informGameAboutChanges && newColor != color) {
++				gameToBeInformedAboutChanges.setColor(index, newColor);
++				color = newColor;
++			}
++			firePreviewChanged();
++		});
++		slotComboBox.addActionListener(e -> firePreviewChanged());
+ 		teamComboBox.addActionListener(e -> {
+ 			byte newTeam = getTeam();
+ 			if (informGameAboutChanges && newTeam != team) {
+@@ -206,7 +226,23 @@ public class PlayerSlot {
+ 		}
+ 	}
+ 
++	private void firePreviewChanged() {
++		if (previewListener != null) {
++			previewListener.run();
++		}
++	}
++
++	/**
++	 * Sets a listener that is called when the map slot or the color of this slot changes.
++	 */
++	public void setPreviewListener(Runnable previewListener) {
++		this.previewListener = previewListener;
++	}
++
+ 	private void initializeComboBoxes() {
++		for (int i = 0; i < PlayerColors.SELECTABLE_COLORS; i++) {
++			colorComboBox.addItem(new ColorUiWrapper(i));
++		}
+ 		civilisationComboBox.addItem(new CivilisationUiWrapper());
+ 		for(ECivilisation civ : ECivilisation.values()) civilisationComboBox.addItem(new CivilisationUiWrapper(civ));
+ 	}
+@@ -251,6 +287,24 @@ public class PlayerSlot {
+ 		teamComboBox.setSelectedIndex(team);
+ 	}
+ 
++	public void setColor(byte color, boolean update) {
++		if (!update) {
++			this.color = color;
++		}
++		int index = Math.abs(color) % PlayerColors.SELECTABLE_COLORS;
++		if (colorComboBox.getSelectedIndex() != index) {
++			colorComboBox.setSelectedIndex(index);
++		}
++	}
++
++	public byte getColor() {
++		return (byte) Math.max(colorComboBox.getSelectedIndex(), 0);
++	}
++
++	public void disableColorInput() {
++		colorComboBox.setEnabled(false);
++	}
++
+ 	public void disableTeamInput() {
+ 		teamComboBox.setEnabled(false);
+ 	}
+@@ -296,6 +350,7 @@ public class PlayerSlot {
+ 		slotComboBox.setEnabled(false);
+ 		disableCivilisationInput();
+ 		disableTeamInput();
++		disableColorInput();
+ 		disablePlayerTypeInput();
+ 	}
+ 
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java b/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java
+index f5d8ddcaf..665ccca77 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java
+@@ -115,6 +115,7 @@ public final class NetworkConstants {
+ 		POSITION_CHANGED,
+ 		TYPE_CHANGED,
+ 		PLAYER_COUNT_CHANGED,
++		COLOR_CHANGED,
+ 		;
+ 
+ 		private static final ENetworkMessage[] values = ENetworkMessage.values();
+@@ -171,6 +172,7 @@ public final class NetworkConstants {
+ 		CHANGE_PLAYER_TYPE,
+ 		CHANGE_POSITION,
+ 		CHANGE_PLAYER_COUNT,
++		CHANGE_COLOR,
+ 		;
+ 
+ 		private static final ENetworkKey[] values = ENetworkKey.values();
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java b/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java
+index aa1944645..d64c1dd16 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java
+@@ -169,6 +169,12 @@ public class NetworkClient implements ITaskScheduler, INetworkConnector, INetwor
+ 		channel.sendPacketAsync(ENetworkKey.CHANGE_TEAM, new ByteTuplePacket(slot, team));
+ 	}
+ 
++	@Override
++	public void setColor(byte slot, byte color) throws IllegalStateException {
++		EPlayerState.assertState(state, EPlayerState.IN_MATCH);
++		channel.sendPacketAsync(ENetworkKey.CHANGE_COLOR, new ByteTuplePacket(slot, color));
++	}
++
+ 	@Override
+ 	public void setType(byte slot, byte playerType) throws IllegalStateException {
+ 		EPlayerState.assertState(state, EPlayerState.IN_MATCH);
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java b/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java
+index cb6072caa..c19be0321 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java
+@@ -96,6 +96,8 @@ public interface INetworkClient {
+ 
+ 	void setTeam(byte slot, byte team) throws IllegalStateException;
+ 
++	void setColor(byte slot, byte color) throws IllegalStateException;
++
+ 	void setType(byte slot, byte playerType) throws IllegalStateException;
+ 
+ 	void setPosition(byte slot, byte position) throws IllegalStateException;
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/common/packets/SlotInfoPacket.java b/jsettlers.network/src/main/java/jsettlers/network/common/packets/SlotInfoPacket.java
+index 51e4b4100..dfbe36492 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/common/packets/SlotInfoPacket.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/common/packets/SlotInfoPacket.java
+@@ -12,6 +12,7 @@ public class SlotInfoPacket extends Packet {
+ 	private byte playerType;
+ 	private byte civilisation;
+ 	private byte position;
++	private byte color;
+ 
+ 	public SlotInfoPacket() {
+ 	}
+@@ -21,13 +22,19 @@ public class SlotInfoPacket extends Packet {
+ 		playerType = slot.getType();
+ 		civilisation = slot.getCivilisation();
+ 		position = slot.getPosition();
++		color = slot.getColor();
+ 	}
+ 
+ 	public SlotInfoPacket(byte team, byte playerType, byte civilisation, byte position) {
++		this(team, playerType, civilisation, position, position);
++	}
++
++	public SlotInfoPacket(byte team, byte playerType, byte civilisation, byte position, byte color) {
+ 		this.team = team;
+ 		this.playerType = playerType;
+ 		this.civilisation = civilisation;
+ 		this.position = position;
++		this.color = color;
+ 	}
+ 
+ 	@Override
+@@ -36,6 +43,7 @@ public class SlotInfoPacket extends Packet {
+ 		dos.writeByte(playerType);
+ 		dos.writeByte(civilisation);
+ 		dos.writeByte(position);
++		dos.writeByte(color);
+ 	}
+ 
+ 	@Override
+@@ -44,6 +52,7 @@ public class SlotInfoPacket extends Packet {
+ 		playerType = dis.readByte();
+ 		civilisation = dis.readByte();
+ 		position = dis.readByte();
++		color = dis.readByte();
+ 	}
+ 
+ 	@Override
+@@ -51,12 +60,13 @@ public class SlotInfoPacket extends Packet {
+ 		if (this == o) return true;
+ 		if (o == null || getClass() != o.getClass()) return false;
+ 		SlotInfoPacket that = (SlotInfoPacket) o;
+-		return team == that.team && playerType == that.playerType && civilisation == that.civilisation && position == that.position;
++		return team == that.team && playerType == that.playerType && civilisation == that.civilisation && position == that.position
++				&& color == that.color;
+ 	}
+ 
+ 	@Override
+ 	public int hashCode() {
+-		return Objects.hash(team, playerType, civilisation, position);
++		return Objects.hash(team, playerType, civilisation, position, color);
+ 	}
+ 
+ 	@Override
+@@ -66,6 +76,7 @@ public class SlotInfoPacket extends Packet {
+ 				", playerType=" + playerType +
+ 				", civilisation=" + civilisation +
+ 				", position=" + position +
++				", color=" + color +
+ 				'}';
+ 	}
+ 
+@@ -84,4 +95,8 @@ public class SlotInfoPacket extends Packet {
+ 	public byte getPosition() {
+ 		return position;
+ 	}
++
++	public byte getColor() {
++		return color;
++	}
+ }
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java b/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java
+index 0910b81d5..ab66480a1 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java
+@@ -67,6 +67,8 @@ public interface IServerManager {
+ 
+ 	void setTeamForSlot(Player player, byte slot, byte team);
+ 
++	void setColorForSlot(Player player, byte slot, byte color);
++
+ 	void setPlayerCount(Player player, int playerCount);
+ 
+ 	void sendMatchesToPlayer(Player player);
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java b/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java
+index 47e5747b5..33cdd607b 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java
+@@ -28,6 +28,7 @@ import jsettlers.network.server.listeners.ChangeCivilisationPacketListener;
+ import jsettlers.network.server.listeners.ChangePlayerCountPacketListener;
+ import jsettlers.network.server.listeners.ChangePlayerTypePacketListener;
+ import jsettlers.network.server.listeners.ChangePositionPacketListener;
++import jsettlers.network.server.listeners.ChangeColorPacketListener;
+ import jsettlers.network.server.listeners.ChangeTeamPacketListener;
+ import jsettlers.network.server.listeners.ChatMessageForwardingListener;
+ import jsettlers.network.server.listeners.IdentifyUserListener;
+@@ -96,6 +97,7 @@ public class ServerManager implements IServerManager {
+ 			channel.registerListener(new ChangePlayerTypePacketListener(this, player));
+ 			channel.registerListener(new ChangePositionPacketListener(this, player));
+ 			channel.registerListener(new ChangeTeamPacketListener(this, player));
++			channel.registerListener(new ChangeColorPacketListener(this, player));
+ 			channel.registerListener(new ChangePlayerCountPacketListener(this, player));
+ 
+ 			return true;
+@@ -252,6 +254,18 @@ public class ServerManager implements IServerManager {
+ 		}
+ 	}
+ 
++	@Override
++	public void setColorForSlot(Player player, byte slot, byte color) {
++		try {
++			Match match = verifyAndGetMatch(player);
++
++			match.setSlotColor(slot, color);
++		} catch (IllegalStateException e) {
++			player.sendPacket(NetworkConstants.ENetworkKey.REJECT_PACKET,
++					new RejectPacket(NetworkConstants.ENetworkMessage.INVALID_STATE_ERROR, NetworkConstants.ENetworkKey.CHANGE_COLOR));
++		}
++	}
++
+ 	@Override
+ 	public void setPlayerCount(Player player, int playerCount) {
+ 		try {
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/listeners/ChangeColorPacketListener.java b/jsettlers.network/src/main/java/jsettlers/network/server/listeners/ChangeColorPacketListener.java
+new file mode 100644
+index 000000000..a98f10f30
+--- /dev/null
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/listeners/ChangeColorPacketListener.java
+@@ -0,0 +1,27 @@
++package jsettlers.network.server.listeners;
++
++import java.io.IOException;
++import jsettlers.network.NetworkConstants;
++import jsettlers.network.common.packets.ByteTuplePacket;
++import jsettlers.network.infrastructure.channel.GenericDeserializer;
++import jsettlers.network.infrastructure.channel.listeners.PacketChannelListener;
++import jsettlers.network.server.IServerManager;
++import jsettlers.network.server.match.Player;
++
++public class ChangeColorPacketListener extends PacketChannelListener<ByteTuplePacket> {
++
++	private final IServerManager serverManager;
++	private final Player player;
++
++	public ChangeColorPacketListener(IServerManager serverManager, Player player) {
++		super(NetworkConstants.ENetworkKey.CHANGE_COLOR, new GenericDeserializer<>(ByteTuplePacket.class));
++
++		this.serverManager = serverManager;
++		this.player = player;
++	}
++
++	@Override
++	protected void receivePacket(NetworkConstants.ENetworkKey key, ByteTuplePacket packet) throws IOException {
++		serverManager.setColorForSlot(player, packet.getValueA(), packet.getValueB());
++	}
++}
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java b/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java
+index 47d1f6891..b0acf7f0e 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java
+@@ -367,6 +367,19 @@ public class Match {
+ 		}
+ 	}
+ 
++	public void setSlotColor(byte slotId, byte color) {
++		byte oldColor;
++		synchronized (slots) {
++			Slot slot = getSlot(slotId);
++			oldColor = slot.getColor();
++			slot.setColor(color);
++		}
++
++		if(oldColor != color) {
++			sendMatchInfoUpdate(ENetworkMessage.COLOR_CHANGED, null);
++		}
++	}
++
+ 	public void setPlayerCount(int playerCount) {
+ 		synchronized (players) {
+ 			if(playerCount < players.size()) {
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/match/Slot.java b/jsettlers.network/src/main/java/jsettlers/network/server/match/Slot.java
+index 32e4d8910..fd304539e 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/match/Slot.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/match/Slot.java
+@@ -5,12 +5,14 @@ public class Slot {
+ 	private byte team;
+ 	private byte civilisation;
+ 	private byte position;
++	private byte color;
+ 
+ 	public Slot(byte type, byte team, byte civilisation, byte position) {
+ 		this.type = type;
+ 		this.team = team;
+ 		this.civilisation = civilisation;
+ 		this.position = position;
++		this.color = position;
+ 	}
+ 
+ 	public byte getType() {
+@@ -29,6 +31,14 @@ public class Slot {
+ 		return position;
+ 	}
+ 
++	public byte getColor() {
++		return color;
++	}
++
++	public void setColor(byte color) {
++		this.color = color;
++	}
++
+ 	public void setType(byte type) {
+ 		this.type = type;
+ 	}
+PATCH_EOF
+cat > "$WORK/patches/24-lan-load-game.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index 9b240e8b8..344f557b0 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -485,6 +485,9 @@ game-menu-description = Ukončit nebo uložit hru
+ 
+ multiplayer-joinmatch-title = Připojit se ke hře
+ multiplayer-newmatch-title = Nová hra
++multiplayer-loadmatch-title = Načíst hru
++multiplayer-missing-map-title = Mapa nenalezena
++multiplayer-missing-map-message = Tato hra používá mapu nebo uloženou hru "%s", která není v tomto počítači.\nUložená hra musí být na všech počítačích přesně stejný soubor: zkopírujte soubor hostitele do své složky s uloženými hrami (~/Library/Application Support/JSettlers/save) a hru restartujte.
+ 
+ multiplayer-indicator-match = hra
+ multiplayer-indicator-maps = mapy
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 5587dd15b..9dab50058 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -491,6 +491,9 @@ game-menu-description = Quit or Save the game
+ 
+ multiplayer-joinmatch-title = Join match
+ multiplayer-newmatch-title = New match
++multiplayer-loadmatch-title = Load game
++multiplayer-missing-map-title = Map not found
++multiplayer-missing-map-message = This game uses the map or saved game "%s", which is not on this computer.\nA saved game must be exactly the same file on all computers: copy the file of the host into your folder of saved games (~/Library/Application Support/JSettlers/save) and restart the game.
+ 
+ multiplayer-indicator-match = match
+ multiplayer-indicator-maps = maps
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+index f856bfc11..a3bba0dd8 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+@@ -212,6 +212,10 @@ public class JSettlersGame {
+ 
+ 				MainGridWithUiSettings gridWithUiState = mapCreator.loadMainGrid(initialGameState.getPlayerSettings(), initialGameState.getStartResources());
+ 				mainGrid = gridWithUiState.getMainGrid();
++				if (multiplayer) {
++					// a saved game continues at its saved time, but the lockstep numbers of the network game start at 0
++					networkConnector.getGameClock().setLockstepBase(MatchConstants.clock().getTime());
++				}
+ 				PlayerState playerState = gridWithUiState.getPlayerState(initialGameState.getPlayerId());
+ 
+ 				RescheduleTimer.schedule(MatchConstants.clock()); // schedule timer
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index 748d105ff..fa85a2269 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -49,6 +49,7 @@ import javax.swing.border.EmptyBorder;
+ import jsettlers.common.menu.ENetworkMessage;
+ import jsettlers.common.menu.EProgressState;
+ import jsettlers.common.menu.IChatMessageListener;
++import jsettlers.common.ai.EPlayerType;
+ import jsettlers.common.menu.IJoinPhaseMultiplayerGameConnector;
+ import jsettlers.common.menu.IJoiningGame;
+ import jsettlers.common.menu.IJoiningGameListener;
+@@ -65,6 +66,7 @@ import jsettlers.graphics.map.MapDrawContext;
+ import jsettlers.logic.map.loading.MapLoader;
+ import jsettlers.logic.map.loading.data.IMapData;
+ import jsettlers.logic.map.loading.newmap.MapFileHeader;
++import jsettlers.logic.map.loading.savegame.SavegameLoader;
+ import jsettlers.common.position.ShortPoint2D;
+ import jsettlers.logic.player.InitialGameState;
+ import jsettlers.logic.player.PlayerSetting;
+@@ -132,6 +134,11 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	/** Positions of the start points in the preview image (index = position on the map), <code>null</code> as long as they are unknown. */
+ 	private int[][] previewStartPoints;
+ 	private Thread previewStartPointsThread;
++	/**
++	 * If a saved game is shown: the positions (player ids) of the players of the saved game, in the order of the slots of the lobby.
++	 * <code>null</code> for new games.
++	 */
++	private int[] savedGamePositions;
+ 
+ 	public JoinGamePanel(JSettlersFrame settlersFrame) {
+ 		this.settlersFrame = settlersFrame;
+@@ -310,6 +317,9 @@ public class JoinGamePanel extends BackgroundPanel {
+ 						}
+ 					});
+ 
++					if (savedGamePositions != null) {
++						sendSavedGameToServer(connector);
++					}
+ 					onSlotsChanged(connector.getSlots(), connector, myId, true); // init the UI with the players
+ 					numberOfPlayersComboBox.informGame(connector);
+ 				});
+@@ -423,7 +433,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 				joinMultiPlayerMap.abort();
+ 				settlersFrame.showMainMenu();
+ 			});
+-			numberOfPlayersComboBox.setEnabled(iAmTheHost);
++			numberOfPlayersComboBox.setEnabled(iAmTheHost && savedGamePositions == null);
+ 		});
+ 	}
+ 
+@@ -451,9 +461,11 @@ public class JoinGamePanel extends BackgroundPanel {
+ 				.map(MapStartResourcesUIWrapper::new)
+ 				.forEach(startResourcesComboBox::addItem);
+ 		startResourcesComboBox.setSelectedIndex(EMapStartResources.HIGH_GOODS.value - 1);
+-		numberOfPlayersComboBox.reset(mapLoader.getMaxPlayers());
++		savedGamePositions = determineSavedGamePositions(mapLoader);
++		int numberOfSlots = savedGamePositions != null ? savedGamePositions.length : mapLoader.getMaxPlayers();
++		numberOfPlayersComboBox.reset(numberOfSlots);
+ 		buildPlayerSlots();
+-		updateNumberOfPlayerSlots(mapLoader.getMaxPlayers());
++		updateNumberOfPlayerSlots(numberOfSlots);
+ 		loadPreviewStartPoints(mapLoader);
+ 	}
+ 
+@@ -569,7 +581,100 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		mapImage.setIcon(new ImageIcon(image));
+ 	}
+ 
++	/**
++	 * Finds the players of a saved game: the positions on the map that are used. The player that saved the game comes first, then the other human
++	 * players, then the computer players. Players that join a LAN game take the slots in this order.
++	 *
++	 * @return The positions, or <code>null</code> if the map is not a saved game.
++	 */
++	private static int[] determineSavedGamePositions(MapLoader mapLoader) {
++		if (!(mapLoader instanceof SavegameLoader)) {
++			return null;
++		}
++		MapFileHeader header = mapLoader.getFileHeader();
++		PlayerSetting[] settings = header.getPlayerSettings();
++		Byte savingPlayer = header.getPlayerId();
++		List<Integer> positions = new ArrayList<>();
++		for (int i = 0; i < settings.length; i++) {
++			if (settings[i].isAvailable()) {
++				positions.add(i);
++			}
++		}
++		positions.sort(Comparator.comparingInt((Integer position) -> {
++			if (savingPlayer != null && savingPlayer.intValue() == position.intValue()) {
++				return 0;
++			}
++			return settings[position].getPlayerType() == EPlayerType.HUMAN || settings[position].getPlayerType() == null ? 1 : 2;
++		}).thenComparingInt(position -> position));
++		return positions.stream().mapToInt(Integer::intValue).toArray();
++	}
++
++	/**
++	 * @return The slot number (team number) that is shown in the lobby for a team of a saved game. The numbers of the teams in the saved game can be
++	 * bigger than the number of players in the lobby, so the teams are numbered in the order of their first appearance.
++	 */
++	private byte savedGameTeamNumber(PlayerSetting[] settings, int slot) {
++		List<Byte> teams = new ArrayList<>();
++		for (int i = 0; i < savedGamePositions.length; i++) {
++			Byte team = settings[savedGamePositions[i]].getTeamId();
++			byte key = team != null ? team : (byte) savedGamePositions[i];
++			if (!teams.contains(key)) {
++				teams.add(key);
++			}
++		}
++		Byte team = settings[savedGamePositions[slot]].getTeamId();
++		return (byte) teams.indexOf(team != null ? team : (byte) savedGamePositions[slot]);
++	}
++
++	private void buildSavedGamePlayerSlots() {
++		PlayerSetting[] settings = mapLoader.getFileHeader().getPlayerSettings();
++		playerSlots.clear();
++		for (byte i = 0; i < savedGamePositions.length; i++) {
++			PlayerSlot playerSlot = playerSlotFactory.createPlayerSlot(i, this.mapLoader);
++			playerSlots.add(playerSlot);
++
++			int position = savedGamePositions[i];
++			PlayerSetting setting = settings[position];
++			playerSlot.setSlot((byte) position, true);
++			playerSlot.setColor((byte) position, true);
++			playerSlot.setPreviewListener(this::refreshPreview);
++			playerSlot.setTeam(savedGameTeamNumber(settings, i), true);
++			if (setting.getCivilisation() != null) {
++				playerSlot.setCivilisation(setting.getCivilisation(), true);
++			}
++			// the position, the nation and the team of a saved game can't be changed
++			playerSlot.disableSlotInput();
++			playerSlot.disableCivilisationInput();
++			playerSlot.disableTeamInput();
++		}
++	}
++
++	/**
++	 * Hands the players of the saved game over to the server of a LAN game: number of slots, positions, nations, teams, colors and types.
++	 */
++	private void sendSavedGameToServer(IJoinPhaseMultiplayerGameConnector connector) {
++		PlayerSetting[] settings = mapLoader.getFileHeader().getPlayerSettings();
++		connector.setPlayerCount(savedGamePositions.length);
++		for (byte i = 0; i < savedGamePositions.length; i++) {
++			int position = savedGamePositions[i];
++			PlayerSetting setting = settings[position];
++			connector.setPosition(i, (byte) position);
++			if (setting.getCivilisation() != null) {
++				connector.setCivilisation(i, setting.getCivilisation());
++			}
++			connector.setTeam(i, savedGameTeamNumber(settings, i));
++			connector.setColor(i, (byte) position);
++			if (i > 0 && setting.getPlayerType() != null) { // the first slot is the host
++				connector.setType(i, setting.getPlayerType());
++			}
++		}
++	}
++
+ 	private void buildPlayerSlots() {
++		if (savedGamePositions != null) {
++			buildSavedGamePlayerSlots();
++			return;
++		}
+ 		int maximumNumberOfPlayers = this.mapLoader.getMaxPlayers();
+ 		playerSlots.clear();
+ 		for (byte i = 0; i < maximumNumberOfPlayers; i++) {
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+index 2528976f7..7bb2e5706 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+@@ -301,6 +301,10 @@ public class PlayerSlot {
+ 		return (byte) Math.max(colorComboBox.getSelectedIndex(), 0);
+ 	}
+ 
++	public void disableSlotInput() {
++		slotComboBox.setEnabled(false);
++	}
++
+ 	public void disableColorInput() {
+ 		colorComboBox.setEnabled(false);
+ 	}
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/ServerConnectionPanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/ServerConnectionPanel.java
+index 48433c491..3f68c246b 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/ServerConnectionPanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/ServerConnectionPanel.java
+@@ -19,6 +19,7 @@ import java.util.Collections;
+ import java.util.List;
+ import java.util.stream.Collectors;
+ 
++import javax.swing.JOptionPane;
+ import javax.swing.JPanel;
+ import javax.swing.JTabbedPane;
+ import javax.swing.SwingUtilities;
+@@ -41,6 +42,7 @@ public abstract class ServerConnectionPanel extends JPanel {
+ 	protected JTabbedPane root = new JTabbedPane();
+ 	private RemoteMapDirectoryPanel maps = null;
+ 	private OpenPanel newMatch = null;
++	private OpenPanel loadMatch = null;
+ 	private OpenPanel joinMatch = null;
+ 	private JSettlersFrame settlersFrame;
+ 
+@@ -71,15 +73,21 @@ public abstract class ServerConnectionPanel extends JPanel {
+ 
+ 		boolean conMatch = connection.isConnected() && connection instanceof IMultiplayerConnector;
+ 		if(!conMatch && newMatch != null) {
++			root.removeTabAt(i);
+ 			root.removeTabAt(i);
+ 			root.removeTabAt(i);
+ 			newMatch = null;
++			loadMatch = null;
+ 			joinMatch = null;
+ 		} else if(conMatch && newMatch == null){
+ 			newMatch = new OpenPanel(MapList.getDefaultList().getFreshMaps().getItems(), this::openNewMatch);
+ 			SwingUtilities.updateComponentTreeUI(newMatch);
+ 			root.insertTab(Labels.getString("multiplayer-newmatch-title"), null, newMatch, null, i);
+ 
++			loadMatch = new OpenPanel(MapList.getDefaultList().getSavedMaps(), this::openNewMatch);
++			SwingUtilities.updateComponentTreeUI(loadMatch);
++			root.insertTab(Labels.getString("multiplayer-loadmatch-title"), null, loadMatch, null, i + 1);
++
+ 			joinMatch = new OpenPanel(Collections.emptyList(), this::joinMatch);
+ 			SwingUtilities.updateComponentTreeUI(joinMatch);
+ 
+@@ -91,7 +99,7 @@ public abstract class ServerConnectionPanel extends JPanel {
+ 						SwingUtilities.invokeLater(() -> joinMatch.setMapLoaders(mapLoaders));
+ 					});
+ 
+-			root.insertTab(Labels.getString("multiplayer-joinmatch-title"), null, joinMatch, null, i+1);
++			root.insertTab(Labels.getString("multiplayer-joinmatch-title"), null, joinMatch, null, i + 2);
+ 		}
+ 
+ 		updateAfter(connection, i);
+@@ -110,6 +118,13 @@ public abstract class ServerConnectionPanel extends JPanel {
+ 
+ 	private void joinMatch(MapLoader loader) {
+ 		NetworkGameMapLoader networkGameMapLoader = (NetworkGameMapLoader) loader;
++		if (MapList.getDefaultList().getMapById(networkGameMapLoader.getMapId()) == null) {
++			// the map or the saved game of the host is not available on this computer
++			JOptionPane.showMessageDialog(this,
++					Labels.getString("multiplayer-missing-map-message", networkGameMapLoader.getMapName()),
++					Labels.getString("multiplayer-missing-map-title"), JOptionPane.WARNING_MESSAGE);
++			return;
++		}
+ 		IJoiningGame joiningGame = ((IMultiplayerConnector)getConnection()).joinMultiplayerGame(networkGameMapLoader.getJoinableGame());
+ 		joiningGame.setListener(new IJoiningGameListener() {
+ 			@Override
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/IGameClock.java b/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/IGameClock.java
+index b7f581636..625629023 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/IGameClock.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/IGameClock.java
+@@ -33,6 +33,13 @@ public interface IGameClock extends IPausingSupplier {
+ 
+ 	void setTime(int newTime);
+ 
++	/**
++	 * Tells the clock that the lockstep numbers of the network game start counting at the given game time (needed if a saved game is continued
++	 * in a network game: the clock does not start at 0, but the server starts counting the lockstep at 0). Not needed if the game starts at time 0.
++	 */
++	default void setLockstepBase(int gameTime) {
++	}
++
+ 	void setTaskExecutor(ITaskExecutor taskExecutor);
+ 
+ 	void multiplyGameSpeed(float factor);
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/time/ISynchronizableClock.java b/jsettlers.network/src/main/java/jsettlers/network/client/time/ISynchronizableClock.java
+index 953cfd91e..d6dbeb432 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/time/ISynchronizableClock.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/time/ISynchronizableClock.java
+@@ -27,6 +27,13 @@ public interface ISynchronizableClock {
+ 	 */
+ 	int getTime();
+ 
++	/**
++	 * @return The time that is exchanged with the other clients and the server: the time since the first lockstep of the network game.
++	 */
++	default int getSyncTime() {
++		return getTime();
++	}
++
+ 	/**
+ 	 * Pauses the clock for at least the given period of time.
+ 	 * 
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSyncSenderTimerTask.java b/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSyncSenderTimerTask.java
+index c4791bd31..aa907b88e 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSyncSenderTimerTask.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSyncSenderTimerTask.java
+@@ -37,7 +37,7 @@ public class TimeSyncSenderTimerTask extends TimerTask {
+ 
+ 	@Override
+ 	public void run() {
+-		int localTime = clock.getTime();
++		int localTime = clock.getSyncTime();
+ 		int expectedTimeAtServer = localTime + channel.getRoundTripTime().getRtt() / 2;
+ 
+ 		channel.sendPacketAsync(NetworkConstants.ENetworkKey.TIME_SYNC, new TimeSyncPacket(expectedTimeAtServer));
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSynchronizationListener.java b/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSynchronizationListener.java
+index 2ec50c613..2a5a31136 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSynchronizationListener.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSynchronizationListener.java
+@@ -43,7 +43,7 @@ public class TimeSynchronizationListener extends PacketChannelListener<TimeSyncP
+ 	@Override
+ 	protected void receivePacket(ENetworkKey key, TimeSyncPacket packet) throws IOException {
+ 		int expectedRemoteTime = packet.getTime() + rttSupplier.getRoundTripTime().getRtt() / 2;
+-		int localTime = clock.getTime();
++		int localTime = clock.getSyncTime();
+ 
+ 		int deltaTime = localTime - expectedRemoteTime;
+ 
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java b/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
+index 2df6ae869..acc15333a 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
+@@ -52,6 +52,8 @@ public final class NetworkTimer extends TimerTask implements INetworkClientClock
+ 	private final LinkedList<SyncTasksPacket> tasks = new LinkedList<>();
+ 
+ 	private int time = 0;
++	/** Game time at which the lockstep numbers of the network game start counting (0 unless a saved game was loaded into a network game). */
++	private int lockstepBase = 0;
+ 	private int maxAllowedLockstep = -1;
+ 
+ 	private boolean isPausing;
+@@ -120,7 +122,7 @@ public final class NetworkTimer extends TimerTask implements INetworkClientClock
+ 	private synchronized void executeRun() {
+ 		try {
+ 			time += TIME_SLICE;
+-			final int lockstep = time / NetworkConstants.Client.LOCKSTEP_PERIOD;
++			final int lockstep = (time - lockstepBase) / NetworkConstants.Client.LOCKSTEP_PERIOD;
+ 
+ 			// check if the lockstep is allowed
+ 			synchronized (lockstepLock) {
+@@ -336,6 +338,16 @@ public final class NetworkTimer extends TimerTask implements INetworkClientClock
+ 		return time;
+ 	}
+ 
++	@Override
++	public void setLockstepBase(int gameTime) {
++		this.lockstepBase = gameTime;
++	}
++
++	@Override
++	public int getSyncTime() {
++		return time - lockstepBase;
++	}
++
+ 	@Override
+ 	public void setReplayLogStream(DataOutputStream replayFileStream) {
+ 		if (this.replayLogStream != null) {
+PATCH_EOF
+cat > "$WORK/patches/25-shared-player-experimental.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/SharedPlayers.java b/jsettlers.common/src/main/java/jsettlers/common/menu/SharedPlayers.java
+new file mode 100644
+index 000000000..460036c81
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/SharedPlayers.java
+@@ -0,0 +1,53 @@
++package jsettlers.common.menu;
++
++import java.util.List;
++
++/**
++ * Human players of a network game that choose the same color and the same nation play together as one player (experimental). They share the
++ * position on the map of the one of them that has the lowest position.
++ */
++public final class SharedPlayers {
++
++	private SharedPlayers() {
++	}
++
++	/**
++	 * Determines the position of the player each slot belongs to.
++	 *
++	 * @param slots
++	 * 		The slots of the lobby.
++	 * @return For every slot (same order as the list) the position that is used in the game: the position of the slot itself, or - if other human
++	 * players have the same color and nation - the lowest position of this group.
++	 */
++	public static byte[] playerPositions(List<? extends IMultiplayerSlot> slots) {
++		byte[] positions = new byte[slots.size()];
++		for (int i = 0; i < positions.length; i++) {
++			IMultiplayerSlot slot = slots.get(i);
++			positions[i] = slot.getPosition();
++			if (slot.getPlayer() == null) {
++				continue; // only human players are merged
++			}
++			for (int j = 0; j < positions.length; j++) {
++				IMultiplayerSlot other = slots.get(j);
++				if (j != i && other.getPlayer() != null && other.getColor() == slot.getColor() && other.getCivilisation() == slot.getCivilisation()
++						&& other.getPosition() < positions[i]) {
++					positions[i] = other.getPosition();
++				}
++			}
++		}
++		return positions;
++	}
++
++	/**
++	 * @return true if the slot with the given index plays together with at least one other slot.
++	 */
++	public static boolean isShared(List<? extends IMultiplayerSlot> slots, int index) {
++		byte[] positions = playerPositions(slots);
++		for (int i = 0; i < positions.length; i++) {
++			if (i != index && positions[i] == positions[index]) {
++				return true;
++			}
++		}
++		return false;
++	}
++}
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index 344f557b0..f56f45d41 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -566,6 +566,7 @@ join-game-panel-player-type = Typ
+ join-game-panel-map-slot = Pozice
+ join-game-panel-team = Tým
+ join-game-panel-color = Barva
++join-game-panel-shared-player-tooltip = Stejná barva a národ: tito hráči hrají společně jako jeden hráč (experimentální).
+ join-game-panel-send-chat-message = Odeslat
+ 
+ stats-panel-exit = Další
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 9dab50058..84004a547 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -572,6 +572,7 @@ join-game-panel-player-type = Type
+ join-game-panel-map-slot = Position
+ join-game-panel-team = Team
+ join-game-panel-color = Color
++join-game-panel-shared-player-tooltip = Same color and nation: these players play together as one player (experimental).
+ join-game-panel-send-chat-message = Send
+ 
+ stats-panel-exit = Next
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+index 57672463b..cd853602c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+@@ -146,14 +146,42 @@ public class MultiplayerGame {
+ 		};
+ 	}
+ 
++	/**
++	 * Human players with the same color and nation play together as one player: only the slot at the lowest position of such a group is a player
++	 * of the game, the others only control it.
++	 */
++	private boolean isMergedIntoOtherSlot(List<? extends IMultiplayerSlot> slots, byte[] playerPositions, IMultiplayerSlot slot) {
++		return playerPositions[slots.indexOf(slot)] != slot.getPosition();
++	}
++
++	private String sharedPlayerName(List<? extends IMultiplayerSlot> slots, byte[] playerPositions, IMultiplayerSlot representative) {
++		StringBuilder name = new StringBuilder();
++		for (int i = 0; i < slots.size(); i++) {
++			IMultiplayerSlot other = slots.get(i);
++			if (other == representative || (playerPositions[i] == representative.getPosition() && other.getPlayer() != null)) {
++				String playerName = playerNameOf(other);
++				if (playerName != null) {
++					if (name.length() > 0) {
++						name.append(" + ");
++					}
++					name.append(playerName);
++				}
++			}
++		}
++		return name.length() > 0 ? name.toString() : null;
++	}
++
+ 	private PlayerSetting[] determinePlayerSettings() {
+-		Map<Byte, PlayerSetting> playerSettings = slotList.getItems().stream().sorted(Comparator.comparingInt(IMultiplayerSlot::getPosition))
++		List<? extends IMultiplayerSlot> allSlots = slotList.getItems();
++		byte[] playerPositions = jsettlers.common.menu.SharedPlayers.playerPositions(allSlots);
++		Map<Byte, PlayerSetting> playerSettings = allSlots.stream().sorted(Comparator.comparingInt(IMultiplayerSlot::getPosition))
++				.filter(slot -> !isMergedIntoOtherSlot(allSlots, playerPositions, slot))
+ 				.map(slot -> {
+ 					PlayerSetting playerSetting;
+ 					if(iAmTheHost) {
+-						playerSetting = new PlayerSetting(slot.getType(), slot.getCivilisation(), slot.getTeam()).withDisplayName(playerNameOf(slot));
++						playerSetting = new PlayerSetting(slot.getType(), slot.getCivilisation(), slot.getTeam()).withDisplayName(sharedPlayerName(allSlots, playerPositions, slot));
+ 					} else {
+-						playerSetting = new PlayerSetting(EPlayerType.HUMAN, slot.getCivilisation(), slot.getTeam()).withDisplayType(slot.getType()).withDisplayName(playerNameOf(slot));
++						playerSetting = new PlayerSetting(EPlayerType.HUMAN, slot.getCivilisation(), slot.getTeam()).withDisplayType(slot.getType()).withDisplayName(sharedPlayerName(allSlots, playerPositions, slot));
+ 					}
+ 
+ 					return Map.entry(slot.getPosition(), playerSetting);
+@@ -166,8 +194,10 @@ public class MultiplayerGame {
+ 		for (int i = 0; i < colors.length; i++) {
+ 			colors[i] = (byte) i;
+ 		}
+-		for (IMultiplayerSlot slot : slotList.getItems()) {
+-			if (slot.getPosition() >= 0 && slot.getPosition() < colors.length) {
++		List<? extends IMultiplayerSlot> allSlots = slotList.getItems();
++		byte[] playerPositions = jsettlers.common.menu.SharedPlayers.playerPositions(allSlots);
++		for (IMultiplayerSlot slot : allSlots) {
++			if (playerPositions[allSlots.indexOf(slot)] == slot.getPosition() && slot.getPosition() >= 0 && slot.getPosition() < colors.length) {
+ 				colors[slot.getPosition()] = slot.getColor();
+ 			}
+ 		}
+@@ -180,9 +210,12 @@ public class MultiplayerGame {
+ 
+ 	private byte calculateOwnPlayerId() {
+ 		String myId = networkClient.getPlayerInfo().getId();
+-		for (IMultiplayerSlot currSlot : slotList.getItems()) {
++		List<? extends IMultiplayerSlot> allSlots = slotList.getItems();
++		byte[] playerPositions = jsettlers.common.menu.SharedPlayers.playerPositions(allSlots);
++		for (int i = 0; i < allSlots.size(); i++) {
++			IMultiplayerSlot currSlot = allSlots.get(i);
+ 			if(currSlot.getPlayer() != null && currSlot.getPlayer().getId().equals(myId)) {
+-				return currSlot.getPosition();
++				return playerPositions[i]; // players that play together as one player share the position
+ 			}
+ 		}
+ 		throw new RuntimeException("Wasn't able to find my id!");
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index fa85a2269..8fd1274e7 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -58,6 +58,7 @@ import jsettlers.common.menu.IMultiplayerListener;
+ import jsettlers.common.menu.IMultiplayerPlayer;
+ import jsettlers.common.menu.IMultiplayerSlot;
+ import jsettlers.common.menu.IStartingGame;
++import jsettlers.common.menu.SharedPlayers;
+ import jsettlers.common.player.PlayerColors;
+ import jsettlers.common.utils.collections.ChangingList;
+ import jsettlers.graphics.localization.Labels;
+@@ -429,6 +430,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 					playerSlot.setReady(true);
+ 				}
+ 			}
++			showSharedPlayers(changingSlots.getItems());
+ 			setCancelButtonActionListener(e -> {
+ 				joinMultiPlayerMap.abort();
+ 				settlersFrame.showMainMenu();
+@@ -437,6 +439,18 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		});
+ 	}
+ 
++	/**
++	 * Human players with the same color and nation play together as one player, so they are shown at the same position.
++	 */
++	private void showSharedPlayers(List<? extends IMultiplayerSlot> slots) {
++		byte[] positions = SharedPlayers.playerPositions(slots);
++		for (int i = 0; i < slots.size() && i < playerSlots.size(); i++) {
++			boolean shared = SharedPlayers.isShared(slots, i);
++			playerSlots.get(i).showSharedPosition(positions[i], shared && positions[i] != slots.get(i).getPosition());
++		}
++		refreshPreview();
++	}
++
+ 	/**
+ 	 * Hands the selected peace time over to the game that is started next.
+ 	 */
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+index 7bb2e5706..7b06eb7c6 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+@@ -70,6 +70,10 @@ public class PlayerSlot {
+ 	private byte slot;
+ 	private byte color;
+ 	private Runnable previewListener;
++	/** true while a slot is shown that is not the real position (players that play together as one player). */
++	private boolean adjustingDisplayedSlot = false;
++	/** false if the position of this slot cannot be changed by the user at all (client of a game, saved game). */
++	private boolean slotInputAllowed = true;
+ 
+ 	public PlayerSlot(byte index) {
+ 		this.index = index;
+@@ -156,6 +160,9 @@ public class PlayerSlot {
+ 		typeComboBox.addActionListener(e -> updateAiPlayerName());
+ 		civilisationComboBox.addActionListener(e -> updateAiPlayerName());
+ 		slotComboBox.addActionListener(e -> {
++			if (adjustingDisplayedSlot) {
++				return;
++			}
+ 			// this is done server side in multiplayer
+ 			if (slotListener != null && gameToBeInformedAboutChanges == null) {
+ 				slotListener.slotHasChanged(oldSlotValue, getSlot());
+@@ -184,6 +191,9 @@ public class PlayerSlot {
+ 			}
+ 		});
+ 		slotComboBox.addActionListener(e -> {
++			if (adjustingDisplayedSlot) {
++				return;
++			}
+ 			byte newSlot = getSlot();
+ 			if(informGameAboutChanges && newSlot != slot) {
+ 				gameToBeInformedAboutChanges.setPosition(index, newSlot);
+@@ -302,9 +312,34 @@ public class PlayerSlot {
+ 	}
+ 
+ 	public void disableSlotInput() {
++		slotInputAllowed = false;
+ 		slotComboBox.setEnabled(false);
+ 	}
+ 
++	/**
++	 * Shows the position of the player this slot plays together with (see {@link jsettlers.common.menu.SharedPlayers}) instead of its own position,
++	 * the position cannot be changed as long as the slot is shown like that. This only changes the display, nothing is sent to the server.
++	 *
++	 * @param position
++	 * 		The position that is shown.
++	 * @param shared
++	 * 		true if the slot plays together with another slot.
++	 */
++	public void showSharedPosition(byte position, boolean shared) {
++		if (shared) {
++			adjustingDisplayedSlot = true;
++			try {
++				if (slotComboBox.getSelectedIndex() != position) {
++					slotComboBox.setSelectedIndex(position);
++				}
++			} finally {
++				adjustingDisplayedSlot = false;
++			}
++		}
++		slotComboBox.setEnabled(slotInputAllowed && !shared);
++		slotComboBox.setToolTipText(shared ? Labels.getString("join-game-panel-shared-player-tooltip") : null);
++	}
++
+ 	public void disableColorInput() {
+ 		colorComboBox.setEnabled(false);
+ 	}
+@@ -351,7 +386,7 @@ public class PlayerSlot {
+ 	}
+ 
+ 	public void disableAllInputs() {
+-		slotComboBox.setEnabled(false);
++		disableSlotInput();
+ 		disableCivilisationInput();
+ 		disableTeamInput();
+ 		disableColorInput();
+PATCH_EOF
+cat > "$WORK/patches/26-save-game-improvements.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
+index 4466ffbda..cc5f6ac62 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
+@@ -51,5 +51,10 @@ public enum EMessageType {
+ 	/**
+ 	 * A building has been finished but its worker cannot be created because there is no free carrier to become the worker.
+ 	 */
+-	NO_FREE_BEARER
++	NO_FREE_BEARER,
++
++	/**
++	 * The game has been saved.
++	 */
++	GAME_SAVED
+ }
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+index c31d09956..ae87d303e 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+@@ -83,6 +83,9 @@ public class SimpleMessage implements IMessage {
+ 
+ 	@Override
+ 	public boolean duplicates(IMessage m) {
++		if (this.type == EMessageType.GAME_SAVED) {
++			return false; // every save is reported, and the message has no position
++		}
+ 		if ((m.getSender() == this.sender)
+ 				&& m.getMessageLabel().equals(this.messageLabel)
+ 				&& m.getType() == this.type) {
+@@ -186,6 +189,15 @@ public class SimpleMessage implements IMessage {
+ 		return new SimpleMessage(EMessageType.NO_FREE_BEARER, "no_free_bearer_soldier|" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
+ 	}
+ 
++	/**
++	 * Creates the message that the game has been saved.
++	 *
++	 * @return The message object
++	 */
++	public static IMessage gameSaved() {
++		return new SimpleMessage(EMessageType.GAME_SAVED, "message_game_saved", (byte) -1, null);
++	}
++
+ 	/**
+ 	 *
+ 	 * @param at
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java b/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java
+index f887f45d1..fc9459489 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java
+@@ -38,10 +38,34 @@ public final class PlayerColors {
+ 	 * Makes the prepared colors the colors of the running game.
+ 	 */
+ 	public static void applyPrepared() {
+-		set(preparedColors);
++		applyPrepared(null);
++	}
++
++	/**
++	 * Makes the prepared colors the colors of the running game. If no colors were prepared, the given colors (e.g. the colors saved in a saved
++	 * game) are used.
++	 *
++	 * @param colorsIfNotPrepared
++	 * 		The colors to use if no colors were prepared or <code>null</code> for the default colors.
++	 */
++	public static void applyPrepared(byte[] colorsIfNotPrepared) {
++		set(preparedColors != null ? preparedColors : colorsIfNotPrepared);
+ 		preparedColors = null;
+ 	}
+ 
++	/**
++	 * @param playerCount
++	 * 		The number of players.
++	 * @return The index of the color of every player of the running game, to store them in a saved game.
++	 */
++	public static byte[] getCurrentColors(int playerCount) {
++		byte[] colors = new byte[playerCount];
++		for (int i = 0; i < playerCount; i++) {
++			colors[i] = (byte) getColorIndex((byte) i);
++		}
++		return colors;
++	}
++
+ 	public static void reset() {
+ 		colorIndexByPlayerId = null;
+ 	}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index 6333ecca8..cf504ced9 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -528,6 +528,7 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 		case NO_FREE_BEARER:
+ 			return new Color(1f, 0.8f, 0.3f, alpha);
+ 		case MINERALS:
++		case GAME_SAVED:
+ 			return new Color(0.6f, 1f, 0.6f, alpha);
+ 		default:
+ 			return new Color(1, 1, 1, alpha);
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index f56f45d41..eca38c741 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -380,6 +380,7 @@ no_soldier_available_BIG_TOWER = Vaši velkou strážní věž nelze obsadit: ne
+ no_soldier_available_CASTLE = Váš hrad nelze obsadit: není k dispozici žádný voják.
+ message_missing_tool = %s nelze obsadit: chybí nástroj (%s).
+ message_no_free_bearer = %s nelze obsadit: není k dispozici žádný volný osadník.
++message_game_saved = Hra uložena.
+ message_no_free_bearer_soldier = %s nemůže zbrojit: není k dispozici žádný volný osadník.
+ action_firerer_slow = Pozor! Hra reaguje pomalu.
+ 
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 84004a547..424274195 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -386,6 +386,7 @@ no_soldier_available_BIG_TOWER = Your large guard tower can't be occupied: no so
+ no_soldier_available_CASTLE = Your castle can't be occupied: no soldier is available.
+ message_missing_tool = %s can't be occupied: tool missing (%s).
+ message_no_free_bearer = %s can't be occupied: no free settler is available.
++message_game_saved = Game saved.
+ message_no_free_bearer_soldier = %s can't arm soldiers: no free settler is available.
+ action_firerer_slow = Warning! The game is responding slowly.
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+index 27be3242d..3dfc7b1fc 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+@@ -28,6 +28,7 @@ import jsettlers.common.CommonConstants;
+ import jsettlers.common.action.EMoveToType;
+ import jsettlers.common.buildings.IBuilding;
+ import jsettlers.common.map.shapes.HexGridArea;
++import jsettlers.common.menu.messages.SimpleMessage;
+ import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.position.ShortPoint2D;
+ import jsettlers.common.selectable.ISelectable;
+@@ -72,6 +73,7 @@ import jsettlers.logic.movable.interfaces.IFerryMovable;
+ import jsettlers.logic.movable.interfaces.ILogicMovable;
+ import jsettlers.logic.movable.interfaces.IMageMovable;
+ import jsettlers.logic.movable.interfaces.IConvertibleToBearer;
++import jsettlers.logic.player.Player;
+ import jsettlers.network.client.task.packets.TaskPacket;
+ import jsettlers.network.synchronic.timer.ITaskExecutor;
+ 
+@@ -305,6 +307,10 @@ class GuiTaskExecutor implements ITaskExecutor {
+ 	private void save() {
+ 		try {
+ 			grid.save(playerId, guiInterface.getUIState());
++			Player player = grid.getPlayer(playerId);
++			if (player != null) {
++				player.showMessage(SimpleMessage.gameSaved());
++			}
+ 		} catch (IOException | InterruptedException e) {
+ 			e.printStackTrace();
+ 		}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
+index fbd6efb2e..71e7c4054 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
+@@ -22,6 +22,8 @@ import java.util.BitSet;
+ import java.util.Date;
+ import java.util.Locale;
+ import java.util.Set;
++import java.util.UUID;
++import java.nio.charset.StandardCharsets;
+ 
+ import java.util.Optional;
+ import jsettlers.algorithms.borders.BordersThread;
+@@ -427,9 +429,14 @@ public final class MainGrid implements Serializable {
+ 			}
+ 		}
+ 
++		// The id of a saved game depends only on the game and the game time, so all computers of a network game create saves with the same id
++		// (every computer saves when one player saves) and the save can be loaded as a LAN game from each computer.
++		String saveId = UUID.nameUUIDFromBytes((mapId + "|" + MatchConstants.clock().getTime()).getBytes(StandardCharsets.UTF_8)).toString();
++
+ 		return new MapFileHeader(
+ 			MapType.SAVED_SINGLE,
+ 			mapName,
++			saveId,
+ 			mapId,
+ 			"TODO: description",
+ 			width,
+@@ -439,7 +446,7 @@ public final class MainGrid implements Serializable {
+ 			new Date(),
+ 			bgImage,
+ 			playerId
+-		);
++		).withPlayerColors(jsettlers.common.player.PlayerColors.getCurrentColors(playerConfigurations.length));
+ 	}
+ 
+ 	public ConstructionMarksGrid getConstructionMarksGrid() {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/loading/newmap/MapFileHeader.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/loading/newmap/MapFileHeader.java
+index 7df437a50..c9191599c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/loading/newmap/MapFileHeader.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/loading/newmap/MapFileHeader.java
+@@ -55,7 +55,8 @@ public class MapFileHeader {
+ 	private static final short VERSION_DATE_ALWAYS_SAVED = 3;
+ 	private static final short VERSION_PLAYER_CONFIGURATIONS = 4;
+ 	private static final short VERSION_PLAYER_ID = 5;
+-	private static final short VERSION = 5;
++	private static final short VERSION_PLAYER_COLORS = 6;
++	private static final short VERSION = 6;
+ 
+ 	private static final byte[] START_BYTES = new byte[] {
+ 			'M', 'A', 'P', ' '
+@@ -72,6 +73,11 @@ public class MapFileHeader {
+ 	private final short height;
+ 	private final short minPlayers;
+ 	private final PlayerSetting[] playerSettings;
++
++	/**
++	 * The color of every player (index of the selectable color, see PlayerColors) or <code>null</code> if the header has no colors (default colors).
++	 */
++	private byte[] playerColors = null;
+ 	private final Date creationDate;
+ 	private final short[] previewImage;
+ 	private final Byte playerId;
+@@ -96,7 +102,10 @@ public class MapFileHeader {
+ 		this(type, name, UUID.randomUUID().toString(), baseMapId, description, width, height, minPlayers, playerConfigurations, date, previewImage, playerId);
+ 	}
+ 
+-	private MapFileHeader(MapType type, String name, String mapId, String baseMapId, String description, short width, short height, short minPlayers, PlayerSetting[] playerSettings, Date date,
++	/**
++	 * Creates a header with the given unique id. Saved games use this to get the same id on all computers of a network game.
++	 */
++	public MapFileHeader(MapType type, String name, String mapId, String baseMapId, String description, short width, short height, short minPlayers, PlayerSetting[] playerSettings, Date date,
+ 			short[] previewImage, Byte playerId) {
+ 		if (previewImage.length != PREVIEW_IMAGE_SIZE * PREVIEW_IMAGE_SIZE) {
+ 			throw new IllegalArgumentException("bg image has wrong size.");
+@@ -155,6 +164,15 @@ public class MapFileHeader {
+ 		return playerSettings;
+ 	}
+ 
++	public byte[] getPlayerColors() {
++		return playerColors == null ? null : playerColors.clone();
++	}
++
++	public MapFileHeader withPlayerColors(byte[] playerColors) {
++		this.playerColors = playerColors == null ? null : playerColors.clone();
++		return this;
++	}
++
+ 	public Byte getPlayerId() {
+ 		return playerId;
+ 	}
+@@ -184,6 +202,11 @@ public class MapFileHeader {
+ 
+ 		out.writeLong(creationDate.getTime());
+ 		out.writeByte(playerId == null ? -1 : playerId);
++
++		out.writeShort(playerColors == null ? 0 : playerColors.length);
++		if (playerColors != null) {
++			out.write(playerColors);
++		}
+ 		out.flush();
+ 	}
+ 
+@@ -254,7 +277,17 @@ public class MapFileHeader {
+ 				playerId = bytePlayerId == -1 ? null : bytePlayerId;
+ 			}
+ 
+-			return new MapFileHeader(type, mapName, mapId, baseMapId, description, width, height, minPlayers, playerConfigurations, date, bgImage, playerId);
++			byte[] playerColors = null;
++			if (version >= VERSION_PLAYER_COLORS) {
++				int colorCount = in.readShort();
++				if (colorCount > 0) {
++					playerColors = new byte[colorCount];
++					in.readFully(playerColors);
++				}
++			}
++
++			return new MapFileHeader(type, mapName, mapId, baseMapId, description, width, height, minPlayers, playerConfigurations, date, bgImage, playerId)
++					.withPlayerColors(playerColors);
+ 
+ 		} catch (Throwable t) {
+ 			if (t instanceof IOException) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+index a3bba0dd8..176e98d06 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+@@ -100,7 +100,12 @@ public class JSettlersGame {
+ 			boolean controlAll, boolean multiplayer, DataInputStream replayFileInputStream) {
+ 		configureLogging(mapCreator);
+ 
+-		jsettlers.common.player.PlayerColors.applyPrepared();
++		// the colors chosen in the lobby, or the colors stored in a saved game
++		byte[] savedColors = null;
++		if (mapCreator instanceof MapLoader && ((MapLoader) mapCreator).getFileHeader() != null) {
++			savedColors = ((MapLoader) mapCreator).getFileHeader().getPlayerColors();
++		}
++		jsettlers.common.player.PlayerColors.applyPrepared(savedColors);
+ 		this.initialGameState = initialGameState;
+ 
+ 		System.out.println("OS version: " + System.getProperty("os.name") + " " + System.getProperty("os.arch") + " "
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index 8fd1274e7..78a923ada 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -640,6 +640,17 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		return (byte) teams.indexOf(team != null ? team : (byte) savedGamePositions[slot]);
+ 	}
+ 
++	/**
++	 * @return The color the player at the given position had in the saved game.
++	 */
++	private byte savedGameColor(int position) {
++		byte[] savedColors = mapLoader.getFileHeader().getPlayerColors();
++		if (savedColors != null && position >= 0 && position < savedColors.length) {
++			return savedColors[position];
++		}
++		return (byte) position;
++	}
++
+ 	private void buildSavedGamePlayerSlots() {
+ 		PlayerSetting[] settings = mapLoader.getFileHeader().getPlayerSettings();
+ 		playerSlots.clear();
+@@ -650,7 +661,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 			int position = savedGamePositions[i];
+ 			PlayerSetting setting = settings[position];
+ 			playerSlot.setSlot((byte) position, true);
+-			playerSlot.setColor((byte) position, true);
++			playerSlot.setColor(savedGameColor(position), true);
+ 			playerSlot.setPreviewListener(this::refreshPreview);
+ 			playerSlot.setTeam(savedGameTeamNumber(settings, i), true);
+ 			if (setting.getCivilisation() != null) {
+@@ -677,7 +688,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 				connector.setCivilisation(i, setting.getCivilisation());
+ 			}
+ 			connector.setTeam(i, savedGameTeamNumber(settings, i));
+-			connector.setColor(i, (byte) position);
++			connector.setColor(i, savedGameColor(position));
+ 			if (i > 0 && setting.getPlayerType() != null) { // the first slot is the host
+ 				connector.setType(i, setting.getPlayerType());
+ 			}
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/MapListCellRenderer.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/MapListCellRenderer.java
+index d7b309f40..33e0111a2 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/MapListCellRenderer.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/MapListCellRenderer.java
+@@ -130,6 +130,11 @@ public class MapListCellRenderer implements ListCellRenderer<MapLoader> {
+ 	 */
+ 	private final SimpleDateFormat df = new SimpleDateFormat(Labels.getString("date.date-only"));
+ 
++	/**
++	 * Format for the time that is shown after the date, so saved games of the same day can be told apart.
++	 */
++	private final SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss");
++
+ 	/**
+ 	 * Cache for preview images
+ 	 */
+@@ -213,7 +218,7 @@ public class MapListCellRenderer implements ListCellRenderer<MapLoader> {
+ 		mapNameLabel.setText(value.getMapName());
+ 		String date = "???";
+ 		if (value.getCreationDate() != null) {
+-			date = df.format(value.getCreationDate());
++			date = df.format(value.getCreationDate()) + " " + timeFormat.format(value.getCreationDate());
+ 		}
+ 
+ 		mapIdLabel.setText(date + " / " + value.getMapId());
+PATCH_EOF
+cat > "$WORK/patches/27-ingame-chat.patch" <<'PATCH_EOF'
+diff --git a/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java b/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java
+index 859fdf9da..58dfdd61d 100644
+--- a/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java
++++ b/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java
+@@ -14,6 +14,7 @@
+  *******************************************************************************/
+ package go.graphics.swing.event.swingInterpreter;
+ 
++import go.graphics.event.TextInput;
+ import java.awt.Component;
+ import java.awt.GraphicsConfiguration;
+ import java.awt.GraphicsDevice;
+@@ -174,12 +175,50 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 		}
+ 	}
+ 
++	private volatile boolean enterHeld = false;
++
+ 	@Override
+ 	public void keyPressed(KeyEvent e) {
+ 		updateModifiers(e);
+ 		if (isModifierKey(e)) {
+ 			return; // a modifier key alone is no key event, it would block the next key (e.g. Control + 1) until it is released
+ 		}
++		if (e.getKeyCode() == KeyEvent.VK_ENTER) {
++			// Enter starts and finishes the text input (chat); a held key must not do both
++			if (enterHeld) {
++				return;
++			}
++			TextInput.Listener enterListener = TextInput.getListener();
++			if (enterListener != null) {
++				enterHeld = true;
++				enterListener.enterPressed();
++				return;
++			}
++			if (!isKeyEventOngoing() && TextInput.start()) {
++				enterHeld = true;
++				return;
++			}
++		}
++		TextInput.Listener textInput = TextInput.getListener();
++		if (textInput != null) {
++			// the keyboard is used to type text: only the keys that edit or finish the text are handled, the others are typed (keyTyped)
++			if (!isKeyEventOngoing()) { // the key that started the text input may still be held down
++				switch (e.getKeyCode()) {
++				case KeyEvent.VK_ENTER:
++					textInput.enterPressed();
++					break;
++				case KeyEvent.VK_ESCAPE:
++					textInput.escapePressed();
++					break;
++				case KeyEvent.VK_BACK_SPACE:
++					textInput.backspacePressed();
++					break;
++				default:
++					break;
++				}
++			}
++			return;
++		}
+ 		String text = getKeyName(e);
+ 		startKeyEvent(text);
+ 		/*
+@@ -271,6 +310,9 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 			case KeyEvent.VK_TAB:
+ 				text = "TAB";
+ 				break;
++			case KeyEvent.VK_ENTER:
++				text = "\n";
++				break;
+ 			default:
+ 				text = "" + e.getKeyChar();
+ 			}
+@@ -281,6 +323,9 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 	@Override
+ 	public void keyReleased(KeyEvent e) {
+ 		updateModifiers(e);
++		if (e.getKeyCode() == KeyEvent.VK_ENTER) {
++			enterHeld = false;
++		}
+ 		if (isModifierKey(e)) {
+ 			return;
+ 		}
+@@ -295,6 +340,13 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 
+ 	@Override
+ 	public void keyTyped(KeyEvent e) {
++		TextInput.Listener textInput = TextInput.getListener();
++		if (textInput != null && !isKeyEventOngoing()) {
++			char character = e.getKeyChar();
++			if (character != KeyEvent.CHAR_UNDEFINED && !Character.isISOControl(character)) {
++				textInput.characterTyped(character);
++			}
++		}
+ 	}
+ 
+ 	@Override
+diff --git a/go.graphics/src/main/java/go/graphics/event/TextInput.java b/go.graphics/src/main/java/go/graphics/event/TextInput.java
+new file mode 100644
+index 000000000..3ad42e9f1
+--- /dev/null
++++ b/go.graphics/src/main/java/go/graphics/event/TextInput.java
+@@ -0,0 +1,82 @@
++package go.graphics.event;
++
++/**
++ * Lets a part of the user interface take over the keyboard to type text (for example the chat of a network game).
++ * <p>
++ * While a {@link Listener} is registered, the keyboard does not trigger the usual key events (hotkeys); the typed characters and the keys Enter,
++ * Escape and Backspace are passed to the listener instead.
++ */
++public final class TextInput {
++	/**
++	 * Receives the typed text.
++	 */
++	public interface Listener {
++		/**
++		 * A printable character was typed.
++		 */
++		void characterTyped(char character);
++
++		/**
++		 * Backspace was pressed.
++		 */
++		void backspacePressed();
++
++		/**
++		 * Enter was pressed: the text is finished.
++		 */
++		void enterPressed();
++
++		/**
++		 * Escape was pressed: the text is cancelled.
++		 */
++		void escapePressed();
++	}
++
++	private static volatile Listener listener = null;
++	private static volatile Runnable starter = null;
++
++	private TextInput() {
++	}
++
++	/**
++	 * Registers the listener that gets the typed text, or removes the current one if <code>null</code> is given.
++	 */
++	public static void setListener(Listener newListener) {
++		listener = newListener;
++	}
++
++	/**
++	 * @return The listener that gets the typed text, or <code>null</code> if the keyboard works as usual.
++	 */
++	public static Listener getListener() {
++		return listener;
++	}
++
++	/**
++	 * Registers the action that starts the text input when the Enter key is pressed, or removes the current one if <code>null</code> is given.
++	 */
++	public static void setStarter(Runnable newStarter) {
++		starter = newStarter;
++	}
++
++	/**
++	 * Starts the text input, if a starter is registered.
++	 *
++	 * @return True if a starter was registered (and called).
++	 */
++	public static boolean start() {
++		Runnable current = starter;
++		if (current == null) {
++			return false;
++		}
++		current.run();
++		return true;
++	}
++
++	/**
++	 * @return True if the keyboard is currently used to type text.
++	 */
++	public static boolean isActive() {
++		return listener != null;
++	}
++}
+diff --git a/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java b/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java
+index eb00550a7..c5ee2ec9d 100644
+--- a/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java
++++ b/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java
+@@ -229,6 +229,13 @@ public class AbstractEventConverter {
+ 		}
+ 	}
+ 
++	/**
++	 * @return True if a key is currently held that started a key event.
++	 */
++	protected synchronized boolean isKeyEventOngoing() {
++		return ongoingKeyEvent != null;
++	}
++
+ 	protected synchronized void endKeyEvent(String string) {
+ 		if (ongoingKeyEvent != null) {
+ 			ongoingKeyEvent.released();
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/ChatAction.java b/jsettlers.common/src/main/java/jsettlers/common/action/ChatAction.java
+new file mode 100644
+index 000000000..03976f248
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/ChatAction.java
+@@ -0,0 +1,21 @@
++package jsettlers.common.action;
++
++/**
++ * Action to send a chat message: {@link EActionType#SEND_CHAT_MESSAGE}.
++ */
++public class ChatAction extends Action {
++	private final String text;
++
++	/**
++	 * @param text
++	 *            The text of the message.
++	 */
++	public ChatAction(String text) {
++		super(EActionType.SEND_CHAT_MESSAGE);
++		this.text = text;
++	}
++
++	public String getText() {
++		return text;
++	}
++}
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+index 5f7931c95..a38735db4 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+@@ -127,6 +127,18 @@ public enum EActionType {
+ 	 */
+ 	RECALL_GROUP,
+ 
++	/**
++	 * Starts typing a chat message (network games only).
++	 */
++	OPEN_CHAT,
++
++	/**
++	 * Sends a chat message to the other players of a network game.
++	 *
++	 * @see ChatAction
++	 */
++	SEND_CHAT_MESSAGE,
++
+ 	/**
+ 	 * Sets the screen to display current message.
+ 	 */
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/IInGameChat.java b/jsettlers.common/src/main/java/jsettlers/common/menu/IInGameChat.java
+new file mode 100644
+index 000000000..478ec2e7d
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/IInGameChat.java
+@@ -0,0 +1,41 @@
++package jsettlers.common.menu;
++
++/**
++ * The chat between the players of a network game, while the game is running.
++ */
++public interface IInGameChat {
++	/**
++	 * Receives the chat messages of all players (including the own ones).
++	 */
++	interface IReceiver {
++		/**
++		 * @param playerId
++		 *            The id of the player in the game (gives the color), or -1 if the sender is not known.
++		 * @param playerName
++		 *            The name of the sender.
++		 * @param text
++		 *            The text of the message.
++		 */
++		void chatMessageReceived(byte playerId, String playerName, String text);
++	}
++
++	/**
++	 * Sends a message to all players of the game.
++	 */
++	void sendMessage(String text);
++
++	/**
++	 * Sets the receiver of the messages, <code>null</code> to remove it.
++	 */
++	void setReceiver(IReceiver receiver);
++
++	/**
++	 * @return The id of the own player in the game.
++	 */
++	byte getOwnPlayerId();
++
++	/**
++	 * @return The name of the own player.
++	 */
++	String getOwnPlayerName();
++}
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/IMapInterfaceConnector.java b/jsettlers.common/src/main/java/jsettlers/common/menu/IMapInterfaceConnector.java
+index f15a38315..d7384e9c8 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/IMapInterfaceConnector.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/IMapInterfaceConnector.java
+@@ -84,4 +84,15 @@ public interface IMapInterfaceConnector extends IMessenger {
+ 	void fireAction(IAction action);
+ 
+ 	void playSound(int soundId, float volume);
++
++	/**
++	 * Allows the user to write chat messages (network games).
++	 *
++	 * @param ownPlayerId
++	 *            The id of the own player in the game, this gives the color of the own messages.
++	 * @param ownPlayerName
++	 *            The name of the own player.
++	 */
++	default void enableChat(byte ownPlayerId, String ownPlayerName) {
++	}
+ }
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
+index cc5f6ac62..49d0e0b8f 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
+@@ -56,5 +56,10 @@ public enum EMessageType {
+ 	/**
+ 	 * The game has been saved.
+ 	 */
+-	GAME_SAVED
++	GAME_SAVED,
++
++	/**
++	 * A general information for the user, the label is a key of the language files.
++	 */
++	INFO
+ }
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/IMessage.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/IMessage.java
+index 5807ba551..e34f6d7bc 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/IMessage.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/IMessage.java
+@@ -64,6 +64,15 @@ public interface IMessage {
+ 	 */
+ 	byte getSender();
+ 
++	/**
++	 * Gets the name of the sender of a chat message.
++	 *
++	 * @return The name or <code>null</code> if the message has no sender name (then the name is derived from {@link #getSender()}).
++	 */
++	default String getSenderName() {
++		return null;
++	}
++
+ 	/**
+ 	 * gets the position where the event occured.
+ 	 * 
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+index ae87d303e..8ce2b84df 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+@@ -28,6 +28,7 @@ public class SimpleMessage implements IMessage {
+ 	private final ShortPoint2D pos;
+ 	private final String messageLabel;
+ 	private final EMessageType type;
++	private final String senderName;
+ 	private int age;
+ 
+ 	/**
+@@ -43,6 +44,11 @@ public class SimpleMessage implements IMessage {
+ 	 * 		The position the messageLabel was sent from.
+ 	 */
+ 	private SimpleMessage(EMessageType type, String messageLabel, byte sender, ShortPoint2D pos) {
++		this(type, messageLabel, sender, null, pos);
++	}
++
++	private SimpleMessage(EMessageType type, String messageLabel, byte sender, String senderName, ShortPoint2D pos) {
++		this.senderName = senderName;
+ 		this.type = type;
+ 		this.messageLabel = messageLabel;
+ 		this.sender = sender;
+@@ -76,6 +82,11 @@ public class SimpleMessage implements IMessage {
+ 		return sender;
+ 	}
+ 
++	@Override
++	public String getSenderName() {
++		return senderName;
++	}
++
+ 	@Override
+ 	public ShortPoint2D getPosition() {
+ 		return pos;
+@@ -83,8 +94,8 @@ public class SimpleMessage implements IMessage {
+ 
+ 	@Override
+ 	public boolean duplicates(IMessage m) {
+-		if (this.type == EMessageType.GAME_SAVED) {
+-			return false; // every save is reported, and the message has no position
++		if (this.type == EMessageType.GAME_SAVED || this.type == EMessageType.INFO || this.type == EMessageType.CHAT) {
++			return false; // these messages are always shown and have no position
+ 		}
+ 		if ((m.getSender() == this.sender)
+ 				&& m.getMessageLabel().equals(this.messageLabel)
+@@ -189,6 +200,32 @@ public class SimpleMessage implements IMessage {
+ 		return new SimpleMessage(EMessageType.NO_FREE_BEARER, "no_free_bearer_soldier|" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
+ 	}
+ 
++	/**
++	 * Creates a chat message of a player of a network game.
++	 *
++	 * @param sender
++	 * 		The id of the player in the game, this gives the color of the message.
++	 * @param senderName
++	 * 		The name of the player.
++	 * @param text
++	 * 		The text the player wrote.
++	 * @return The message object
++	 */
++	public static IMessage chat(byte sender, String senderName, String text) {
++		return new SimpleMessage(EMessageType.CHAT, text, sender, senderName, null);
++	}
++
++	/**
++	 * Creates a general information for the user.
++	 *
++	 * @param label
++	 * 		The key of the text in the language files.
++	 * @return The message object
++	 */
++	public static IMessage info(String label) {
++		return new SimpleMessage(EMessageType.INFO, label, (byte) -1, null);
++	}
++
+ 	/**
+ 	 * Creates the message that the game has been saved.
+ 	 *
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index cf504ced9..409485cb4 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -33,6 +33,7 @@ import go.graphics.event.GOEvent;
+ import go.graphics.event.GOEventHandler;
+ import go.graphics.event.GOKeyEvent;
+ import go.graphics.event.GOModalEventHandler;
++import go.graphics.event.TextInput;
+ import go.graphics.event.command.EModifier;
+ import go.graphics.event.command.GOCommandEvent;
+ import go.graphics.event.mouse.GODrawEvent;
+@@ -48,6 +49,7 @@ import jsettlers.common.Color;
+ import jsettlers.common.CommitInfo;
+ import jsettlers.common.CommonConstants;
+ import jsettlers.common.action.Action;
++import jsettlers.common.action.ChatAction;
+ import jsettlers.common.action.EActionType;
+ import jsettlers.common.action.GroupAction;
+ import jsettlers.common.action.IAction;
+@@ -96,6 +98,7 @@ import jsettlers.graphics.map.draw.Background;
+ import jsettlers.graphics.map.draw.DrawConstants;
+ import jsettlers.graphics.map.draw.ImageProvider;
+ import jsettlers.graphics.map.draw.MapObjectDrawer;
++import jsettlers.common.menu.messages.SimpleMessage;
+ import jsettlers.graphics.messages.Messenger;
+ import jsettlers.graphics.sound.BackgroundSound;
+ import jsettlers.graphics.sound.MusicManager;
+@@ -492,8 +495,11 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 	 */
+ 	private static String getMessageText(IMessage m) {
+ 		String label = m.getMessageLabel();
++		if (m.getType() == EMessageType.CHAT) {
++			return label; // the text the player wrote
++		}
+ 		String text = Labels.getString(label);
+-		if (m.getType() == EMessageType.CHAT || !text.equals(label)) {
++		if (!text.equals(label)) {
+ 			return text;
+ 		}
+ 		if (label.startsWith("missing_tool|")) {
+@@ -563,28 +569,145 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 			float y = offsetY + messageIndex * lineHeight * yDirection;
+ 			float a = messageAlpha(m);
+ 			float startX = x;
+-			if (m.getSender() >= 0) {
+-				String name = getPlayername(m.getSender()) + ":";
+-				Color color = MapDrawContext.getPlayerColor(m.getSender());
+-				float width = drawer.getWidth(name);
+-				for (int i = -1; i < 3; i++) {
+-					drawer.drawString(x + i, y - 1, new Color(1, 1, 1, a/2), name);
+-				}
+-				drawer.drawString(x, y, new Color(color.getRed(), color.getGreen(), color.getBlue(), a), name);
+-				x += width + 10;
++			if (m.getSender() >= 0 || m.getSenderName() != null) {
++				String name = (m.getSenderName() != null ? m.getSenderName() : getPlayername(m.getSender())) + ":";
++				x += drawOutlinedText(drawer, x, y, getPlayerMessageColor(m.getSender(), a), a, name) + 10;
+ 			}
+ 
+ 			String text = getMessageText(m);
+-			drawer.drawString(x, y, getMessageColor(m, a), text);
++			if (m.getType() == EMessageType.CHAT) {
++				// chat messages have the color of the player who wrote them
++				drawOutlinedText(drawer, x, y, getPlayerMessageColor(m.getSender(), a), a, text);
++			} else {
++				drawer.drawString(x, y, getMessageColor(m, a), text);
++			}
+ 			if (m.getPosition() != null) {
+ 				areas.add(new MessageArea(startX, y - lineHeight * 0.2f, x - startX + drawer.getWidth(text), lineHeight, m.getPosition()));
+ 			}
+ 
+ 			messageIndex++;
+ 		}
++
++		if (chatTyping) {
++			// the message the user is writing, in the color of the own player
++			float y = offsetY + messageIndex * lineHeight * yDirection;
++			String name = chatPlayerName + ":";
++			Color color = getPlayerMessageColor(chatPlayerId, 1f);
++			float x = offsetX + drawOutlinedText(drawer, offsetX, y, color, 1f, name) + 10;
++			String typed;
++			synchronized (chatInput) {
++				typed = chatInput.toString();
++			}
++			drawOutlinedText(drawer, x, y, color, 1f, typed + ((System.currentTimeMillis() / 500) % 2 == 0 ? "_" : " "));
++		}
+ 		messageAreas = areas.toArray(new MessageArea[0]);
+ 	}
+ 
++	private static Color getPlayerMessageColor(byte playerId, float alpha) {
++		if (playerId < 0) {
++			return new Color(1, 1, 1, alpha);
++		}
++		Color color = MapDrawContext.getPlayerColor(playerId);
++		return new Color(color.getRed(), color.getGreen(), color.getBlue(), alpha);
++	}
++
++	/**
++	 * Draws a text with a dark shadow, so that it can be read in every player color. The shadow has the same transparency as the text, so that both
++	 * fade together (the text drawer discards everything that is less than half opaque).
++	 *
++	 * @return The width of the text.
++	 */
++	private static float drawOutlinedText(TextDrawer drawer, float x, float y, Color color, float alpha, String text) {
++		drawer.drawString(x + 1, y - 1, new Color(0, 0, 0, alpha), text);
++		drawer.drawString(x, y, color, text);
++		return drawer.getWidth(text);
++	}
++
++	// ---- chat of network games ----
++
++	private static final int CHAT_MAX_LENGTH = 100;
++
++	private volatile boolean chatEnabled = false;
++	private volatile boolean chatTyping = false;
++	private volatile byte chatPlayerId = -1;
++	private volatile String chatPlayerName = "";
++	private final StringBuilder chatInput = new StringBuilder();
++
++	private final TextInput.Listener chatInputListener = new TextInput.Listener() {
++		@Override
++		public void characterTyped(char character) {
++			synchronized (chatInput) {
++				if (chatInput.length() < CHAT_MAX_LENGTH) {
++					chatInput.append(character);
++				}
++			}
++		}
++
++		@Override
++		public void backspacePressed() {
++			synchronized (chatInput) {
++				if (chatInput.length() > 0) {
++					chatInput.setLength(chatInput.length() - 1);
++				}
++			}
++		}
++
++		@Override
++		public void enterPressed() {
++			String text;
++			synchronized (chatInput) {
++				text = chatInput.toString().trim();
++			}
++			stopChatInput();
++			if (!text.isEmpty()) {
++				getInterfaceConnector().fireAction(new ChatAction(text));
++			}
++		}
++
++		@Override
++		public void escapePressed() {
++			stopChatInput();
++		}
++	};
++
++	/**
++	 * Allows the user to write chat messages.
++	 */
++	public void enableChat(byte ownPlayerId, String ownPlayerName) {
++		this.chatPlayerId = ownPlayerId;
++		this.chatPlayerName = ownPlayerName != null ? ownPlayerName : "";
++		this.chatEnabled = true;
++		TextInput.setStarter(this::startChatInput);
++	}
++
++	/**
++	 * Starts typing a chat message: the keyboard is used for the text until Enter or Escape is pressed.
++	 */
++	private void startChatInput() {
++		if (!chatEnabled) {
++			synchronized (messenger) {
++				messenger.addMessage(SimpleMessage.info("message_chat_only_in_network_games"));
++			}
++			return;
++		}
++		synchronized (chatInput) {
++			chatInput.setLength(0);
++		}
++		chatTyping = true;
++		TextInput.setListener(chatInputListener);
++	}
++
++	private void stopChatInput() {
++		if (TextInput.getListener() == chatInputListener) {
++			TextInput.setListener(null);
++		}
++		chatTyping = false;
++	}
++
++	private static boolean isEnterKey(String keyCode) {
++		return "\n".equals(keyCode) || "\r".equals(keyCode) || "ENTER".equalsIgnoreCase(keyCode);
++	}
++
+ 	private String getPlayername(byte sender) {
+ 		// TODO: Player names
+ 		return "player " + sender;
+@@ -843,6 +966,10 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 			Optional<Action> action = getActionForCommand(commandEvent);
+ 			// also set when action was null, to abort drawing.
+ 			fireActionEvent(event, action);
++		} else if (event instanceof GOKeyEvent && isEnterKey(((GOKeyEvent) event).getKeyCode())) {
++			if (chatEnabled && !chatTyping) {
++				startChatInput();
++			}
+ 		} else if (event instanceof GOKeyEvent) {
+ 			Optional<Action> actionForKeyboard = Optional.ofNullable(getActionForKeyboard(((GOKeyEvent) event).getKeyCode()));
+ 			actionForKeyboard.ifPresent(action -> 
+@@ -1243,6 +1370,10 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 
+ 	@Override
+ 	public void fireAction(IAction action) {
++		if (action.getActionType() == EActionType.OPEN_CHAT) {
++			startChatInput();
++			return;
++		}
+ 		IAction fire = controls.replaceAction(action);
+ 		if (fire != null) {
+ 			getInterfaceConnector().fireAction(fire);
+@@ -1260,6 +1391,8 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 	}
+ 
+ 	public void stop() {
++		stopChatInput();
++		TextInput.setStarter(null);
+ 		musicManager.stopMusic();
+ 		backgroundSound.stop();
+ 		controls.stop();
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapInterfaceConnector.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapInterfaceConnector.java
+index 6d5ff9dea..e0d19c862 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapInterfaceConnector.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapInterfaceConnector.java
+@@ -67,6 +67,11 @@ public class MapInterfaceConnector implements ActionFireable, IMapInterfaceConne
+ 	 * @param selection
+ 	 *            The selection.
+ 	 */
++	@Override
++	public void enableChat(byte ownPlayerId, String ownPlayerName) {
++		this.content.enableChat(ownPlayerId, ownPlayerName);
++	}
++
+ 	@Override
+ 	public void setSelection(ISelectionSet selection) {
+ 		this.content.setSelection(selection);
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
+index c33bda95f..21054ae3e 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
+@@ -65,6 +65,7 @@ public class OriginalControls implements IControls {
+ 	private final MinimapMode minimapSettings = new MinimapMode();
+ 	private final MainPanel mainPanel;
+ 	private final Button chatButton;
++	private ActionFireable actionFireable;
+ 
+ 	private ControlPanelLayoutProperties layoutProperties;
+ 	private UIPanel uiBase;
+@@ -321,32 +322,14 @@ public class OriginalControls implements IControls {
+ 	}
+ 
+ 	/**
+-	 * This should one day display the chat.
++	 * Starts typing a chat message (the same as pressing Enter).
+ 	 */
+ 	private final class ShowChatAction extends ExecutableAction {
+-		private final MessageContent messageContent = new MessageContent(
+-				"This is not yet implemented.",
+-				"Cancel",
+-				new ExecutableAction() {
+-					@Override
+-					public void execute() {
+-						mainPanel.setContent(ContentType.BUILD_NORMAL);
+-						chatButton.setActive(false);
+-					}
+-				},
+-				"Ok",
+-				new ExecutableAction() {
+-					@Override
+-					public void execute() {
+-						mainPanel.setContent(ContentType.BUILD_NORMAL);
+-						chatButton.setActive(false);
+-					}
+-				});
+-
+ 		@Override
+ 		public void execute() {
+-			mainPanel.setContent(messageContent);
+-			chatButton.setActive(true); // TODO needs to be unset when content changes.
++			if (actionFireable != null) {
++				actionFireable.fireAction(new Action(EActionType.OPEN_CHAT));
++			}
+ 		}
+ 	}
+ 
+@@ -424,6 +407,7 @@ public class OriginalControls implements IControls {
+ 
+ 	@Override
+ 	public void setDrawContext(ActionFireable actionFireable, MapDrawContext context) {
++		this.actionFireable = actionFireable;
+ 		this.context = context;
+ 		this.minimap = new Minimap(context, minimapSettings);
+ 	}
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index eca38c741..155922671 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -381,6 +381,7 @@ no_soldier_available_CASTLE = Váš hrad nelze obsadit: není k dispozici žádn
+ message_missing_tool = %s nelze obsadit: chybí nástroj (%s).
+ message_no_free_bearer = %s nelze obsadit: není k dispozici žádný volný osadník.
+ message_game_saved = Hra uložena.
++message_chat_only_in_network_games = Chat je dostupný jen v síťové hře. Zprávu napíšeš po stisku Enter.
+ message_no_free_bearer_soldier = %s nemůže zbrojit: není k dispozici žádný volný osadník.
+ action_firerer_slow = Pozor! Hra reaguje pomalu.
+ 
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 424274195..3bfdb7197 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -387,6 +387,7 @@ no_soldier_available_CASTLE = Your castle can't be occupied: no soldier is avail
+ message_missing_tool = %s can't be occupied: tool missing (%s).
+ message_no_free_bearer = %s can't be occupied: no free settler is available.
+ message_game_saved = Game saved.
++message_chat_only_in_network_games = Chat is only available in network games. Press Enter to write a message.
+ message_no_free_bearer_soldier = %s can't arm soldiers: no free settler is available.
+ action_firerer_slow = Warning! The game is responding slowly.
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+index 3e830ba33..81e4e3ea5 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+@@ -31,6 +31,8 @@ import java.util.stream.Collectors;
+ import jsettlers.algorithms.construction.ConstructionMarksThread;
+ import jsettlers.common.CommonConstants;
+ import jsettlers.common.action.BuildAction;
++import jsettlers.common.action.ChatAction;
++import jsettlers.common.menu.IInGameChat;
+ import jsettlers.common.action.CastSpellAction;
+ import jsettlers.common.action.ChangeTradingRequestAction;
+ import jsettlers.common.action.GroupAction;
+@@ -148,6 +150,15 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 		return groups;
+ 	}
+ 
++	private volatile IInGameChat chat;
++
++	/**
++	 * Sets the chat of a network game, so chat messages written by the user are sent to the other players.
++	 */
++	public void setChat(IInGameChat chat) {
++		this.chat = chat;
++	}
++
+ 	public GuiInterface(IMapInterfaceConnector connector, IGameClock clock, ITaskScheduler taskScheduler, IGuiInputGrid grid, IGameStoppable gameStoppable, byte playerId, boolean multiplayer) {
+ 		this.connector = connector;
+ 		this.clock = clock;
+@@ -324,6 +335,12 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 				}
+ 				break;
+ 
++			case SEND_CHAT_MESSAGE:
++				if (chat != null) {
++					chat.sendMessage(((ChatAction) action).getText());
++				}
++				break;
++
+ 			case SAVE:
+ 				taskScheduler.scheduleTask(new SimpleGuiTask(EGuiAction.QUICK_SAVE, playerId));
+ 				break;
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+index 176e98d06..dd330cf6e 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+@@ -34,7 +34,9 @@ import jsettlers.common.logging.MultiplexingOutputStream;
+ import jsettlers.common.map.IGraphicsGrid;
+ import jsettlers.common.menu.EGameError;
+ import jsettlers.common.menu.EProgressState;
++import jsettlers.common.menu.IInGameChat;
+ import jsettlers.common.menu.IMapInterfaceConnector;
++import jsettlers.common.menu.messages.SimpleMessage;
+ import jsettlers.common.menu.IStartedGame;
+ import jsettlers.common.menu.IStartingGame;
+ import jsettlers.common.menu.IStartingGameListener;
+@@ -84,6 +86,7 @@ public class JSettlersGame {
+ 	private final IGameCreator mapCreator;
+ 	private final INetworkConnector networkConnector;
+ 	private final boolean multiplayer;
++	private IInGameChat chat;
+ 	private final DataInputStream replayFileInputStream;
+ 
+ 	private final GameRunner gameRunner;
+@@ -135,6 +138,13 @@ public class JSettlersGame {
+ 	 * @param mapCreator
+ 	 * @param networkConnector
+ 	 */
++	/**
++	 * Sets the chat between the players of a network game. Must be called before the game is started.
++	 */
++	public void setChat(IInGameChat chat) {
++		this.chat = chat;
++	}
++
+ 	public JSettlersGame(IGameCreator mapCreator, INetworkConnector networkConnector, InitialGameState initialGameState) {
+ 		this(mapCreator, networkConnector, initialGameState, CommonConstants.CONTROL_ALL, true, null);
+ 	}
+@@ -249,6 +259,11 @@ public class JSettlersGame {
+ 				final IMapInterfaceConnector connector = startingGameListener.preLoadFinished(this);
+ 				GuiInterface guiInterface = new GuiInterface(connector, MatchConstants.clock(), networkConnector.getTaskScheduler(),
+ 						mainGrid.getGuiInputGrid(), this, initialGameState.getPlayerId(), multiplayer);
++				if (chat != null) {
++					guiInterface.setChat(chat);
++					connector.enableChat(chat.getOwnPlayerId(), chat.getOwnPlayerName());
++					chat.setReceiver((playerId, playerName, text) -> connector.showMessage(SimpleMessage.chat(playerId, playerName, text)));
++				}
+ 				connector.loadUIState(playerState.getUiState()); // This is required after the GuiInterface instantiation so that
+ 				// ConstructionMarksThread has it's mapArea variable initialized via the EActionType.SCREEN_CHANGE event.
+ 
+@@ -275,6 +290,9 @@ public class JSettlersGame {
+ 
+ 				networkConnector.shutdown();
+ 				mainGrid.stopThreads();
++				if (chat != null) {
++					chat.setReceiver(null);
++				}
+ 				connector.shutdown();
+ 				guiInterface.stop();
+ 				clearState();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+index cd853602c..42646aa3f 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+@@ -25,6 +25,7 @@ import java.util.stream.IntStream;
+ import jsettlers.common.ai.EPlayerType;
+ import jsettlers.common.menu.ENetworkMessage;
+ import jsettlers.common.menu.IChatMessageListener;
++import jsettlers.common.menu.IInGameChat;
+ import jsettlers.common.menu.IJoinPhaseMultiplayerGameConnector;
+ import jsettlers.common.menu.IJoiningGame;
+ import jsettlers.common.menu.IJoiningGameListener;
+@@ -68,6 +69,7 @@ public class MultiplayerGame {
+ 	private IJoiningGameListener joiningGameListener;
+ 	private IMultiplayerListener multiplayerListener;
+ 	private IChatMessageListener chatMessageListener;
++	private volatile InGameChat inGameChat;
+ 	private boolean iAmTheHost = false;
+ 	private int maxPlayers;
+ 
+@@ -122,12 +124,73 @@ public class MultiplayerGame {
+ 
+ 	private IPacketReceiver<ChatMessagePacket> generateChatMessageReceiver() {
+ 		return packet -> {
++			InGameChat gameChat = inGameChat;
++			if (gameChat != null && gameChat.deliver(packet.getAuthorId(), packet.getMessage())) {
++				return; // the game is running: the message is shown in the game
++			}
+ 			if (chatMessageListener != null) {
+ 				chatMessageListener.chatMessageReceived(packet.getAuthorId(), packet.getMessage());
+ 			}
+ 		};
+ 	}
+ 
++	/**
++	 * The chat while the game is running. Remembers the names and positions of the players of the start of the game.
++	 */
++	private final class InGameChat implements IInGameChat {
++		private final byte ownPlayerId;
++		private final String ownPlayerName;
++		private final Map<String, Byte> playerIds = new java.util.HashMap<>();
++		private final Map<String, String> playerNames = new java.util.HashMap<>();
++		private volatile IReceiver receiver;
++
++		InGameChat(byte ownPlayerId) {
++			this.ownPlayerId = ownPlayerId;
++			List<? extends IMultiplayerSlot> allSlots = slotList.getItems();
++			byte[] playerPositions = jsettlers.common.menu.SharedPlayers.playerPositions(allSlots);
++			for (int i = 0; i < allSlots.size(); i++) {
++				IMultiplayerPlayer player = allSlots.get(i).getPlayer();
++				if (player != null) {
++					playerIds.put(player.getId(), playerPositions[i]);
++					playerNames.put(player.getId(), player.getName());
++				}
++			}
++			String name = networkClient.getPlayerInfo().getName();
++			this.ownPlayerName = name != null ? name : playerNames.get(networkClient.getPlayerInfo().getId());
++		}
++
++		@Override
++		public void sendMessage(String text) {
++			networkClient.sendChatMessage(text);
++		}
++
++		@Override
++		public void setReceiver(IReceiver receiver) {
++			this.receiver = receiver;
++		}
++
++		@Override
++		public byte getOwnPlayerId() {
++			return ownPlayerId;
++		}
++
++		@Override
++		public String getOwnPlayerName() {
++			return ownPlayerName;
++		}
++
++		boolean deliver(String authorId, String text) {
++			IReceiver currentReceiver = receiver;
++			if (currentReceiver == null) {
++				return false;
++			}
++			Byte playerId = playerIds.get(authorId);
++			String name = playerNames.get(authorId);
++			currentReceiver.chatMessageReceived(playerId != null ? playerId : -1, name != null ? name : authorId, text);
++			return true;
++		}
++	}
++
+ 	private IPacketReceiver<MatchStartPacket> generateMatchStartedListener() {
+ 		return packet -> {
+ 			updateLists(packet.getMatchInfo());
+@@ -141,6 +204,8 @@ public class MultiplayerGame {
+ 			InitialGameState initialGameState = new InitialGameState(ownPlayerId, playerSettings, randomSeed);
+ 
+ 			JSettlersGame game = new JSettlersGame(mapLoader, networkClient.getNetworkConnector(), initialGameState);
++			inGameChat = new InGameChat(ownPlayerId);
++			game.setChat(inGameChat);
+ 
+ 			multiplayerListener.gameIsStarting(game.start());
+ 		};
+PATCH_EOF
+cat > "$WORK/patches/28-lobby-peace-time-and-layout.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java b/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java
+index 063e0efe9..d5e22b4f2 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java
+@@ -69,6 +69,19 @@ public interface IJoinPhaseMultiplayerGameConnector {
+ 	default void setColor(byte slot, byte color) {
+ 	}
+ 
++	/**
++	 * Tells the other players which peace time (in minutes) the host has selected. Only the host may do this.
++	 */
++	default void setPeaceTime(int minutes) {
++	}
++
++	/**
++	 * @return The peace time (in minutes) the host has selected, as far as it is known.
++	 */
++	default int getPeaceTime() {
++		return 0;
++	}
++
+ 	void setPlayerCount(int playerCount);
+ 
+ 	/**
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+index 42646aa3f..2cf534cf8 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+@@ -72,6 +72,7 @@ public class MultiplayerGame {
+ 	private volatile InGameChat inGameChat;
+ 	private boolean iAmTheHost = false;
+ 	private int maxPlayers;
++	private volatile int peaceTime = 0;
+ 
+ 	public MultiplayerGame(AsyncNetworkClientConnector networkClientFactory) {
+ 		this.networkClientFactory = networkClientFactory;
+@@ -302,6 +303,7 @@ public class MultiplayerGame {
+ 
+ 	void updateLists(MatchInfoPacket matchInfo) {
+ 		maxPlayers = matchInfo.getMaxPlayers();
++		peaceTime = matchInfo.getPeaceTime();
+ 		List<IMultiplayerPlayer> players = new LinkedList<>();
+ 		for (PlayerInfoPacket playerInfoPacket : matchInfo.getPlayers()) {
+ 			players.add(new MultiplayerPlayer(playerInfoPacket));
+@@ -404,6 +406,16 @@ public class MultiplayerGame {
+ 				networkClient.setPlayerCount(playerCount);
+ 			}
+ 
++			@Override
++			public void setPeaceTime(int minutes) {
++				networkClient.setPeaceTime((byte) minutes);
++			}
++
++			@Override
++			public int getPeaceTime() {
++				return peaceTime;
++			}
++
+ 			@Override
+ 			public void setMultiplayerListener(IMultiplayerListener multiplayerListener) {
+ 				MultiplayerGame.this.multiplayerListener = multiplayerListener;
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index 78a923ada..80cd4c549 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -26,6 +26,7 @@ import java.awt.FlowLayout;
+ import java.awt.GridBagConstraints;
+ import java.awt.GridBagLayout;
+ import java.awt.GridLayout;
++import java.awt.Insets;
+ import java.awt.event.ActionListener;
+ import java.util.ArrayList;
+ import java.util.Arrays;
+@@ -37,6 +38,7 @@ import javax.swing.BorderFactory;
+ import javax.swing.ImageIcon;
+ import javax.swing.JButton;
+ import javax.swing.JComboBox;
++import javax.swing.JComponent;
+ import javax.swing.JLabel;
+ import javax.swing.JPanel;
+ import javax.swing.JScrollPane;
+@@ -140,6 +142,8 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	 * <code>null</code> for new games.
+ 	 */
+ 	private int[] savedGamePositions;
++	/** The game that is told about the peace time the host selects, <code>null</code> for everybody but the host of a network game. */
++	private IJoinPhaseMultiplayerGameConnector peaceTimeConnector;
+ 
+ 	public JoinGamePanel(JSettlersFrame settlersFrame) {
+ 		this.settlersFrame = settlersFrame;
+@@ -156,12 +160,8 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		westPanel.add(settingsPanelWrapper, BorderLayout.CENTER);
+ 		settingsPanelWrapper.add(settingsPanel);
+ 		//settingsPanel.setLayout(new GridLayout(0, 2, 20, 0));
+-		JPanel settingsLabelPanel = new JPanel();
+-		settingsLabelPanel.setLayout(new GridLayout(3, 0, 0, 20));
+-		JPanel settingsComboBoxPanel = new JPanel();
+-		settingsComboBoxPanel.setLayout(new GridLayout(3, 0, 0, 20));
+-		settingsPanel.add(settingsLabelPanel);
+-		settingsPanel.add(settingsComboBoxPanel);
++		// one row per setting: label and combo box share the row, so that their centers are on the same height
++		settingsPanel.setLayout(new GridBagLayout());
+ 		mapPanel.setLayout(new BorderLayout());
+ 		JPanel mapNameLabelWrapper = new JPanel();
+ 		mapPanel.add(mapNameLabelWrapper, BorderLayout.NORTH);
+@@ -169,12 +169,10 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		mapNameLabel.setHorizontalAlignment(SwingConstants.CENTER);
+ 		mapPanel.add(mapImage, BorderLayout.CENTER);
+ 		mapImage.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+-		settingsLabelPanel.add(numberOfPlayersLabel);
+-		settingsComboBoxPanel.add(numberOfPlayersComboBox);
+-		settingsLabelPanel.add(startResourcesLabel);
+-		settingsComboBoxPanel.add(startResourcesComboBox);
+-		settingsLabelPanel.add(peaceTimeLabel);
+-		settingsComboBoxPanel.add(peaceTimeComboBox);
++		addSettingsRow(0, numberOfPlayersLabel, numberOfPlayersComboBox);
++		addSettingsRow(1, startResourcesLabel, startResourcesComboBox);
++		addSettingsRow(2, peaceTimeLabel, peaceTimeComboBox);
++		peaceTimeComboBox.addActionListener(e -> informAboutPeaceTime());
+ 		sendChatMessageButton.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 15));
+ 		JPanel chatPanel = new JPanel();
+ 		chatPanel.setLayout(new BorderLayout(0, 10));
+@@ -203,6 +201,25 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		add(content);
+ 	}
+ 
++	private void addSettingsRow(int row, JComponent label, JComponent comboBox) {
++		int gap = row > 0 ? 20 : 0;
++		GridBagConstraints labelConstraints = new GridBagConstraints();
++		labelConstraints.gridx = 0;
++		labelConstraints.gridy = row;
++		labelConstraints.anchor = GridBagConstraints.CENTER;
++		labelConstraints.fill = GridBagConstraints.HORIZONTAL;
++		labelConstraints.insets = new Insets(gap, 0, 0, 20);
++		settingsPanel.add(label, labelConstraints);
++
++		GridBagConstraints comboBoxConstraints = new GridBagConstraints();
++		comboBoxConstraints.gridx = 1;
++		comboBoxConstraints.gridy = row;
++		comboBoxConstraints.anchor = GridBagConstraints.CENTER;
++		comboBoxConstraints.fill = GridBagConstraints.HORIZONTAL;
++		comboBoxConstraints.insets = new Insets(gap, 0, 0, 0);
++		settingsPanel.add(comboBox, comboBoxConstraints);
++	}
++
+ 	private void setStyle() {
+ 		mapNameLabel.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_LONG);
+ 		numberOfPlayersLabel.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_SHORT);
+@@ -243,6 +260,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	}
+ 
+ 	public void setSinglePlayerMap(MapLoader mapLoader) {
++		peaceTimeConnector = null;
+ 		this.playerSlotFactory = new SinglePlayerSlotFactory();
+ 		titleLabel.setText(Labels.getString("join-game-panel-new-single-player-game-title"));
+ 		peaceTimeComboBox.setEnabled(true);
+@@ -280,6 +298,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	}
+ 
+ 	public void setNewMultiPlayerMap(MapLoader mapLoader, IMultiplayerConnector connector) {
++		peaceTimeConnector = null;
+ 		this.playerSlotFactory = new HostOfMultiplayerPlayerSlotFactory(connector);
+ 		titleLabel.setText(Labels.getString("join-game-panel-new-multi-player-game-title"));
+ 		peaceTimeComboBox.setEnabled(true);
+@@ -300,6 +319,8 @@ public class JoinGamePanel extends BackgroundPanel {
+ 			public void gameJoined(IJoinPhaseMultiplayerGameConnector connector) {
+ 				SwingUtilities.invokeLater(() -> {
+ 					initializeChatFor(connector);
++					peaceTimeConnector = connector;
++					informAboutPeaceTime(); // the guests see the peace time from the start
+ 					setStartButtonActionListener(e -> {
+ 						applySelectedPeaceTime();
+ 						waitForPreviewStartPoints();
+@@ -336,6 +357,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	}
+ 
+ 	public void setJoinMultiPlayerMap(IJoinPhaseMultiplayerGameConnector joinMultiPlayerMap, MapLoader mapLoader, String playerUUID) {
++		peaceTimeConnector = null;
+ 		playerSlotFactory = new ClientOfMultiplayerPlayerSlotFactory();
+ 		titleLabel.setText(Labels.getString("join-game-panel-join-multi-player-game-title"));
+ 		peaceTimeComboBox.setEnabled(false);
+@@ -430,6 +452,9 @@ public class JoinGamePanel extends BackgroundPanel {
+ 					playerSlot.setReady(true);
+ 				}
+ 			}
++			if (!iAmTheHost) {
++				showPeaceTimeOfHost(joinMultiPlayerMap.getPeaceTime());
++			}
+ 			showSharedPlayers(changingSlots.getItems());
+ 			setCancelButtonActionListener(e -> {
+ 				joinMultiPlayerMap.abort();
+@@ -459,6 +484,27 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		JSettlersGame.setNextGamePeaceTimeMinutes(selected == null ? 0 : selected.minutes);
+ 	}
+ 
++	/**
++	 * Tells the other players of the network game about the peace time the host has selected.
++	 */
++	private void informAboutPeaceTime() {
++		IJoinPhaseMultiplayerGameConnector connector = peaceTimeConnector;
++		EPeaceTime selected = (EPeaceTime) peaceTimeComboBox.getSelectedItem();
++		if (connector != null && selected != null) {
++			connector.setPeaceTime(selected.minutes);
++		}
++	}
++
++	/**
++	 * Shows the peace time the host has selected (only the host can change it).
++	 */
++	private void showPeaceTimeOfHost(int minutes) {
++		EPeaceTime peaceTime = EPeaceTime.ofMinutes(minutes);
++		if (peaceTimeComboBox.getSelectedItem() != peaceTime) {
++			peaceTimeComboBox.setSelectedItem(peaceTime);
++		}
++	}
++
+ 	private void prepareUiFor(MapLoader mapLoader) {
+ 		this.mapLoader = mapLoader;
+ 		mapNameLabel.setText(mapLoader.getMapName());
+@@ -819,6 +865,15 @@ public class JoinGamePanel extends BackgroundPanel {
+ 			this.minutes = minutes;
+ 		}
+ 
++		static EPeaceTime ofMinutes(int minutes) {
++			for (EPeaceTime peaceTime : values()) {
++				if (peaceTime.minutes == minutes) {
++					return peaceTime;
++				}
++			}
++			return WITHOUT;
++		}
++
+ 		@Override
+ 		public String toString() {
+ 			return Labels.getString("peace-time-" + name());
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java b/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java
+index 665ccca77..540101471 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java
+@@ -116,6 +116,7 @@ public final class NetworkConstants {
+ 		TYPE_CHANGED,
+ 		PLAYER_COUNT_CHANGED,
+ 		COLOR_CHANGED,
++		PEACE_TIME_CHANGED,
+ 		;
+ 
+ 		private static final ENetworkMessage[] values = ENetworkMessage.values();
+@@ -173,6 +174,7 @@ public final class NetworkConstants {
+ 		CHANGE_POSITION,
+ 		CHANGE_PLAYER_COUNT,
+ 		CHANGE_COLOR,
++		CHANGE_PEACE_TIME,
+ 		;
+ 
+ 		private static final ENetworkKey[] values = ENetworkKey.values();
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java b/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java
+index d64c1dd16..8300110cb 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java
+@@ -175,6 +175,12 @@ public class NetworkClient implements ITaskScheduler, INetworkConnector, INetwor
+ 		channel.sendPacketAsync(ENetworkKey.CHANGE_COLOR, new ByteTuplePacket(slot, color));
+ 	}
+ 
++	@Override
++	public void setPeaceTime(byte peaceTimeMinutes) throws IllegalStateException {
++		EPlayerState.assertState(state, EPlayerState.IN_MATCH);
++		channel.sendPacketAsync(ENetworkKey.CHANGE_PEACE_TIME, new ByteTuplePacket(peaceTimeMinutes, (byte) 0));
++	}
++
+ 	@Override
+ 	public void setType(byte slot, byte playerType) throws IllegalStateException {
+ 		EPlayerState.assertState(state, EPlayerState.IN_MATCH);
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java b/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java
+index c19be0321..f0dfde316 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java
+@@ -98,6 +98,11 @@ public interface INetworkClient {
+ 
+ 	void setColor(byte slot, byte color) throws IllegalStateException;
+ 
++	/**
++	 * Tells the other players of the match which peace time (in minutes) the host has selected. Only the host may do this.
++	 */
++	void setPeaceTime(byte peaceTimeMinutes) throws IllegalStateException;
++
+ 	void setType(byte slot, byte playerType) throws IllegalStateException;
+ 
+ 	void setPosition(byte slot, byte position) throws IllegalStateException;
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/common/packets/MatchInfoPacket.java b/jsettlers.network/src/main/java/jsettlers/network/common/packets/MatchInfoPacket.java
+index 544026bfb..6098f5987 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/common/packets/MatchInfoPacket.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/common/packets/MatchInfoPacket.java
+@@ -35,6 +35,8 @@ public class MatchInfoPacket extends Packet {
+ 	private MapInfoPacket mapInfo;
+ 	private PlayerInfoPacket[] players;
+ 	private SlotInfoPacket[] slots;
++	/** The peace time (in minutes) that is selected by the host. */
++	private byte peaceTime;
+ 
+ 	public MatchInfoPacket() {
+ 	}
+@@ -56,6 +58,7 @@ public class MatchInfoPacket extends Packet {
+ 		mapInfo = match.getMap();
+ 		players = match.getPlayerInfos();
+ 		slots = match.getSlotInfos();
++		peaceTime = match.getPeaceTime();
+ 	}
+ 
+ 	@Override
+@@ -76,6 +79,7 @@ public class MatchInfoPacket extends Packet {
+ 		for(SlotInfoPacket curr : slots) {
+ 			curr.serialize(dos);
+ 		}
++		dos.writeByte(peaceTime);
+ 	}
+ 
+ 	@Override
+@@ -104,6 +108,11 @@ public class MatchInfoPacket extends Packet {
+ 		}
+ 
+ 		this.slots = slots;
++		peaceTime = dis.readByte();
++	}
++
++	public byte getPeaceTime() {
++		return peaceTime;
+ 	}
+ 
+ 	public String getId() {
+@@ -135,7 +144,7 @@ public class MatchInfoPacket extends Packet {
+ 		if (this == o) return true;
+ 		if (o == null || getClass() != o.getClass()) return false;
+ 		MatchInfoPacket that = (MatchInfoPacket) o;
+-		return maxPlayers == that.maxPlayers && Objects.equals(id, that.id) && Objects.equals(matchName, that.matchName) && Objects.equals(mapInfo, that.mapInfo) && Arrays.equals(players, that.players) && Arrays.equals(slots, that.slots);
++		return maxPlayers == that.maxPlayers && peaceTime == that.peaceTime && Objects.equals(id, that.id) && Objects.equals(matchName, that.matchName) && Objects.equals(mapInfo, that.mapInfo) && Arrays.equals(players, that.players) && Arrays.equals(slots, that.slots);
+ 	}
+ 
+ 	@Override
+@@ -149,6 +158,6 @@ public class MatchInfoPacket extends Packet {
+ 	@Override
+ 	public String toString() {
+ 		return "MatchInfoPacket [id=" + id + ", matchName=" + matchName + ", maxPlayers=" + maxPlayers + ", mapInfo=" + mapInfo + ", players="
+-				+ Arrays.toString(players) + ", slots=" + Arrays.toString(slots) + "]";
++				+ Arrays.toString(players) + ", slots=" + Arrays.toString(slots) + ", peaceTime=" + peaceTime + "]";
+ 	}
+ }
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java b/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java
+index ab66480a1..1bcf449ff 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java
+@@ -69,6 +69,8 @@ public interface IServerManager {
+ 
+ 	void setColorForSlot(Player player, byte slot, byte color);
+ 
++	void setPeaceTime(Player player, byte peaceTimeMinutes);
++
+ 	void setPlayerCount(Player player, int playerCount);
+ 
+ 	void sendMatchesToPlayer(Player player);
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java b/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java
+index 33cdd607b..43ee1f16a 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java
+@@ -29,6 +29,7 @@ import jsettlers.network.server.listeners.ChangePlayerCountPacketListener;
+ import jsettlers.network.server.listeners.ChangePlayerTypePacketListener;
+ import jsettlers.network.server.listeners.ChangePositionPacketListener;
+ import jsettlers.network.server.listeners.ChangeColorPacketListener;
++import jsettlers.network.server.listeners.ChangePeaceTimePacketListener;
+ import jsettlers.network.server.listeners.ChangeTeamPacketListener;
+ import jsettlers.network.server.listeners.ChatMessageForwardingListener;
+ import jsettlers.network.server.listeners.IdentifyUserListener;
+@@ -98,6 +99,7 @@ public class ServerManager implements IServerManager {
+ 			channel.registerListener(new ChangePositionPacketListener(this, player));
+ 			channel.registerListener(new ChangeTeamPacketListener(this, player));
+ 			channel.registerListener(new ChangeColorPacketListener(this, player));
++			channel.registerListener(new ChangePeaceTimePacketListener(this, player));
+ 			channel.registerListener(new ChangePlayerCountPacketListener(this, player));
+ 
+ 			return true;
+@@ -266,6 +268,18 @@ public class ServerManager implements IServerManager {
+ 		}
+ 	}
+ 
++	@Override
++	public void setPeaceTime(Player player, byte peaceTimeMinutes) {
++		try {
++			Match match = verifyAndGetMatch(player);
++
++			match.setPeaceTime(peaceTimeMinutes);
++		} catch (IllegalStateException e) {
++			player.sendPacket(NetworkConstants.ENetworkKey.REJECT_PACKET,
++					new RejectPacket(NetworkConstants.ENetworkMessage.INVALID_STATE_ERROR, NetworkConstants.ENetworkKey.CHANGE_PEACE_TIME));
++		}
++	}
++
+ 	@Override
+ 	public void setPlayerCount(Player player, int playerCount) {
+ 		try {
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/listeners/ChangePeaceTimePacketListener.java b/jsettlers.network/src/main/java/jsettlers/network/server/listeners/ChangePeaceTimePacketListener.java
+new file mode 100644
+index 000000000..edef5004e
+--- /dev/null
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/listeners/ChangePeaceTimePacketListener.java
+@@ -0,0 +1,30 @@
++package jsettlers.network.server.listeners;
++
++import java.io.IOException;
++import jsettlers.network.NetworkConstants;
++import jsettlers.network.common.packets.ByteTuplePacket;
++import jsettlers.network.infrastructure.channel.GenericDeserializer;
++import jsettlers.network.infrastructure.channel.listeners.PacketChannelListener;
++import jsettlers.network.server.IServerManager;
++import jsettlers.network.server.match.Player;
++
++/**
++ * Receives the peace time (in minutes) the host has selected. The second value of the packet is not used.
++ */
++public class ChangePeaceTimePacketListener extends PacketChannelListener<ByteTuplePacket> {
++
++	private final IServerManager serverManager;
++	private final Player player;
++
++	public ChangePeaceTimePacketListener(IServerManager serverManager, Player player) {
++		super(NetworkConstants.ENetworkKey.CHANGE_PEACE_TIME, new GenericDeserializer<>(ByteTuplePacket.class));
++
++		this.serverManager = serverManager;
++		this.player = player;
++	}
++
++	@Override
++	protected void receivePacket(NetworkConstants.ENetworkKey key, ByteTuplePacket packet) throws IOException {
++		serverManager.setPeaceTime(player, packet.getValueA());
++	}
++}
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java b/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java
+index b0acf7f0e..49f2058f1 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java
+@@ -59,6 +59,7 @@ public class Match {
+ 	private TaskCollectingListener taskCollectingListener;
+ 	private TaskSendingTimerTask taskSendingTimerTask;
+ 	private int currPlayers;
++	private volatile byte peaceTime = 0;
+ 
+ 	public Match(String name, int maxPlayers, MapInfoPacket map, Player host, long randomSeed) {
+ 		this.maxPlayers = maxPlayers;
+@@ -380,6 +381,17 @@ public class Match {
+ 		}
+ 	}
+ 
++	public byte getPeaceTime() {
++		return peaceTime;
++	}
++
++	public void setPeaceTime(byte peaceTime) {
++		if(this.peaceTime == peaceTime) return;
++
++		this.peaceTime = peaceTime;
++		sendMatchInfoUpdate(ENetworkMessage.PEACE_TIME_CHANGED, null);
++	}
++
+ 	public void setPlayerCount(int playerCount) {
+ 		synchronized (players) {
+ 			if(playerCount < players.size()) {
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java b/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
+index acc15333a..e5165031d 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
+@@ -345,6 +345,12 @@ public final class NetworkTimer extends TimerTask implements INetworkClientClock
+ 
+ 	@Override
+ 	public int getSyncTime() {
++		if (!scheduled) {
++			// While a game is loading, the clock is already set to the time of the saved game, but the lockstep base is not known yet. Reporting such
++			// a time would make the server believe that this client is far ahead and it would stop waiting for it, so that the commands of the
++			// players are executed with a huge delay (or never).
++			return 0;
++		}
+ 		return time - lockstepBase;
+ 	}
+ 
+PATCH_EOF
+PATCH_NAMES="01-lan-multiplayer-broadcast 02-endgame-player-names 03-gifts-of-the-gods-spell 04-soldiers-ignore-far-civilians 05-font-quality-and-size 06-building-cost-tooltip 07-tooltip-position 08-in-game-messages 09-messages-layout-and-settings-file 10-game-speed-and-fps-limit 11-amazon-storage-shadow 12-language-selection-czech 13-thief-fixes 14-zoom-indicator 15-control-groups 16-peacetime 17-hd-graphics 18-smithy-output 19-auto-work-area 20-convert-specialists-to-bearers 21-faster-growth 22-settler-messages-and-tool-demand 23-lobby-colors-and-positions 24-lan-load-game 25-shared-player-experimental 26-save-game-improvements 27-ingame-chat 28-lobby-peace-time-and-layout"
 for P in $PATCH_NAMES; do
 	git apply --check "$WORK/patches/$P.patch" || die "Patch $P cannot be applied - the source code has changed since the tested version."
 	git apply --whitespace=nowarn "$WORK/patches/$P.patch"
@@ -7433,6 +10909,12 @@ grep -q "moveWorkAreaToWork" jsettlers.logic/src/main/java/jsettlers/logic/movab
 grep -q "IConvertibleToBearer" jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/GeologistMovable.java || die "Patch 20 was not applied."
 grep -q "faster than the original" jsettlers.logic/src/main/java/jsettlers/logic/objects/growing/Corn.java || die "Patch 21 was not applied."
 grep -q "popToolForProfessionSettings" jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java || die "Patch 22 was not applied."
+grep -q "class PlayerColors" jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java || die "Patch 23 was not applied."
+grep -q "setLockstepBase" jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java || die "Patch 24 was not applied."
+grep -q "class SharedPlayers" jsettlers.common/src/main/java/jsettlers/common/menu/SharedPlayers.java || die "Patch 25 was not applied."
+grep -q "GAME_SAVED" jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java || die "Patch 26 was not applied."
+grep -q "class TextInput" go.graphics/src/main/java/go/graphics/event/TextInput.java || die "Patch 27 was not applied."
+grep -q "PEACE_TIME_CHANGED" jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java || die "Patch 28 was not applied."
 
 # ---------------------------------------------------------------- compilation
 say "Compiling (the first run takes several minutes, dependencies are downloaded)"

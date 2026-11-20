@@ -1,0 +1,929 @@
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java b/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java
+index bde71ea79..063e0efe9 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java
+@@ -63,6 +63,12 @@ public interface IJoinPhaseMultiplayerGameConnector {
+ 
+ 	void setTeam(byte slot, byte team);
+ 
++	/**
++	 * Sets the color of a slot (index of the color table, see {@link jsettlers.common.player.PlayerColors}).
++	 */
++	default void setColor(byte slot, byte color) {
++	}
++
+ 	void setPlayerCount(int playerCount);
+ 
+ 	/**
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/IMultiplayerSlot.java b/jsettlers.common/src/main/java/jsettlers/common/menu/IMultiplayerSlot.java
+index 6bede4976..2a9a7d77c 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/IMultiplayerSlot.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/IMultiplayerSlot.java
+@@ -13,4 +13,11 @@ public interface IMultiplayerSlot {
+ 	byte getTeam();
+ 
+ 	byte getPosition();
++
++	/**
++	 * @return The index of the color chosen for this slot (see {@link jsettlers.common.player.PlayerColors}).
++	 */
++	default byte getColor() {
++		return getPosition();
++	}
+ }
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java b/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java
+new file mode 100644
+index 000000000..f887f45d1
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java
+@@ -0,0 +1,59 @@
++package jsettlers.common.player;
++
++/**
++ * Holds the colors the players have chosen for the game that is running or starting. A color is the index of an entry of the player color
++ * table of the graphics. Without a choice, the color of a player is given by his player id (the position on the map).
++ */
++public final class PlayerColors {
++
++	/** Number of colors a player can choose from (the colors of the original game). */
++	public static final int SELECTABLE_COLORS = 20;
++
++	private static volatile byte[] colorIndexByPlayerId = null;
++
++	private PlayerColors() {
++	}
++
++	/**
++	 * Sets the colors for the next game.
++	 *
++	 * @param colorIndexByPlayerId
++	 * 		The index of the color for every player id (position on the map) or <code>null</code> for the default colors.
++	 */
++	public static void set(byte[] colorIndexByPlayerId) {
++		PlayerColors.colorIndexByPlayerId = colorIndexByPlayerId == null ? null : colorIndexByPlayerId.clone();
++	}
++
++	private static volatile byte[] preparedColors = null;
++
++	/**
++	 * Prepares the colors of the game that is started next. They become active when the game object is created ({@link #applyPrepared()}).
++	 * Games that are started without preparing colors (saved games, replays) use the default colors.
++	 */
++	public static void prepareNextGame(byte[] colorIndexByPlayerId) {
++		preparedColors = colorIndexByPlayerId == null ? null : colorIndexByPlayerId.clone();
++	}
++
++	/**
++	 * Makes the prepared colors the colors of the running game.
++	 */
++	public static void applyPrepared() {
++		set(preparedColors);
++		preparedColors = null;
++	}
++
++	public static void reset() {
++		colorIndexByPlayerId = null;
++	}
++
++	/**
++	 * @return The index of the color of the given player.
++	 */
++	public static int getColorIndex(byte playerId) {
++		byte[] colors = colorIndexByPlayerId;
++		if (colors != null && playerId >= 0 && playerId < colors.length) {
++			return colors[playerId];
++		}
++		return playerId;
++	}
++}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapDrawContext.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapDrawContext.java
+index 29c237ac0..3674dcf51 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapDrawContext.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapDrawContext.java
+@@ -242,7 +242,18 @@ public final class MapDrawContext implements IGLProvider {
+ 	}
+ 
+ 	/**
+-	 * Gets the color for a given player.
++	 * Gets an entry of the player color table.
++	 *
++	 * @param colorIndex
++	 *            The index of the color.
++	 * @return The color.
++	 */
++	public static Color getSelectableColor(int colorIndex) {
++		return PLAYER_COLORS[Math.abs(colorIndex) % PLAYER_COLORS.length];
++	}
++
++	/**
++	 * Gets the color for a given player, taking the colors chosen in the lobby into account.
+ 	 *
+ 	 * @param player
+ 	 *            The player to get the color for.
+@@ -250,7 +261,7 @@ public final class MapDrawContext implements IGLProvider {
+ 	 */
+ 	public static Color getPlayerColor(byte player) {
+ 		if (player >= 0) {
+-			return PLAYER_COLORS[player % PLAYER_COLORS.length];
++			return PLAYER_COLORS[Math.abs(jsettlers.common.player.PlayerColors.getColorIndex(player)) % PLAYER_COLORS.length];
+ 		} else {
+ 			return Color.BLACK;
+ 		}
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index c65076796..9b240e8b8 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -562,6 +562,7 @@ join-game-panel-civilisation = Národ
+ join-game-panel-player-type = Typ
+ join-game-panel-map-slot = Pozice
+ join-game-panel-team = Tým
++join-game-panel-color = Barva
+ join-game-panel-send-chat-message = Odeslat
+ 
+ stats-panel-exit = Další
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index ba8046ff8..5587dd15b 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -568,6 +568,7 @@ join-game-panel-civilisation = Civilisation
+ join-game-panel-player-type = Type
+ join-game-panel-map-slot = Position
+ join-game-panel-team = Team
++join-game-panel-color = Color
+ join-game-panel-send-chat-message = Send
+ 
+ stats-panel-exit = Next
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+index ae5133d7f..f856bfc11 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+@@ -100,6 +100,7 @@ public class JSettlersGame {
+ 			boolean controlAll, boolean multiplayer, DataInputStream replayFileInputStream) {
+ 		configureLogging(mapCreator);
+ 
++		jsettlers.common.player.PlayerColors.applyPrepared();
+ 		this.initialGameState = initialGameState;
+ 
+ 		System.out.println("OS version: " + System.getProperty("os.name") + " " + System.getProperty("os.arch") + " "
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+index 495109732..57672463b 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+@@ -135,6 +135,7 @@ public class MultiplayerGame {
+ 			MapLoader mapLoader = MapList.getDefaultList().getMapById(packet.getMatchInfo().getMapInfo().getId());
+ 			long randomSeed = packet.getRandomSeed();
+ 			PlayerSetting[] playerSettings = determinePlayerSettings();
++			jsettlers.common.player.PlayerColors.prepareNextGame(determinePlayerColors());
+ 			byte ownPlayerId = calculateOwnPlayerId();
+ 			// TODO start resources
+ 			InitialGameState initialGameState = new InitialGameState(ownPlayerId, playerSettings, randomSeed);
+@@ -160,6 +161,19 @@ public class MultiplayerGame {
+ 		return IntStream.range(0, maxPlayers).mapToObj(i -> playerSettings.computeIfAbsent((byte) i, v -> new PlayerSetting())).toArray(PlayerSetting[]::new);
+ 	}
+ 
++	private byte[] determinePlayerColors() {
++		byte[] colors = new byte[Math.max(maxPlayers, 1)];
++		for (int i = 0; i < colors.length; i++) {
++			colors[i] = (byte) i;
++		}
++		for (IMultiplayerSlot slot : slotList.getItems()) {
++			if (slot.getPosition() >= 0 && slot.getPosition() < colors.length) {
++				colors[slot.getPosition()] = slot.getColor();
++			}
++		}
++		return colors;
++	}
++
+ 	private static String playerNameOf(IMultiplayerSlot slot) {
+ 		return slot.getPlayer() != null ? slot.getPlayer().getName() : null;
+ 	}
+@@ -272,6 +286,11 @@ public class MultiplayerGame {
+ 				networkClient.setTeam(slot, team);
+ 			}
+ 
++			@Override
++			public void setColor(byte slot, byte color) {
++				networkClient.setColor(slot, color);
++			}
++
+ 			@Override
+ 			public void setType(byte slot, EPlayerType playerType) {
+ 				networkClient.setType(slot, (byte) playerType.ordinal());
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/datatypes/MultiplayerSlot.java b/jsettlers.logic/src/main/java/jsettlers/main/datatypes/MultiplayerSlot.java
+index ec9b152f9..abab75a71 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/datatypes/MultiplayerSlot.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/datatypes/MultiplayerSlot.java
+@@ -13,6 +13,7 @@ public class MultiplayerSlot implements IMultiplayerSlot {
+ 	private final ECivilisation civilisation;
+ 	private final byte team;
+ 	private final byte position;
++	private final byte color;
+ 
+ 
+ 	public MultiplayerSlot(SlotInfoPacket packet) {
+@@ -23,6 +24,7 @@ public class MultiplayerSlot implements IMultiplayerSlot {
+ 		this.player = player;
+ 		this.team = packet.getTeam();
+ 		this.position = packet.getPosition();
++		this.color = packet.getColor();
+ 		this.civilisation = getCivilisation(packet.getCivilisation());
+ 		this.type = getPlayerType(packet.getPlayerType());
+ 	}
+@@ -67,4 +69,9 @@ public class MultiplayerSlot implements IMultiplayerSlot {
+ 	public byte getPosition() {
+ 		return position;
+ 	}
++
++	@Override
++	public byte getColor() {
++		return color;
++	}
+ }
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index 7047f90a0..748d105ff 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -14,7 +14,14 @@
+  *******************************************************************************/
+ package jsettlers.main.swing.menu.joinpanel;
+ 
++import java.awt.BasicStroke;
+ import java.awt.BorderLayout;
++import java.awt.Color;
++import java.awt.Font;
++import java.awt.FontMetrics;
++import java.awt.Graphics2D;
++import java.awt.RenderingHints;
++import java.awt.image.BufferedImage;
+ import java.awt.FlowLayout;
+ import java.awt.GridBagConstraints;
+ import java.awt.GridBagLayout;
+@@ -50,10 +57,15 @@ import jsettlers.common.menu.IMultiplayerListener;
+ import jsettlers.common.menu.IMultiplayerPlayer;
+ import jsettlers.common.menu.IMultiplayerSlot;
+ import jsettlers.common.menu.IStartingGame;
++import jsettlers.common.player.PlayerColors;
+ import jsettlers.common.utils.collections.ChangingList;
+ import jsettlers.graphics.localization.Labels;
+ import jsettlers.logic.map.loading.EMapStartResources;
++import jsettlers.graphics.map.MapDrawContext;
+ import jsettlers.logic.map.loading.MapLoader;
++import jsettlers.logic.map.loading.data.IMapData;
++import jsettlers.logic.map.loading.newmap.MapFileHeader;
++import jsettlers.common.position.ShortPoint2D;
+ import jsettlers.logic.player.InitialGameState;
+ import jsettlers.logic.player.PlayerSetting;
+ import jsettlers.main.JSettlersGame;
+@@ -108,12 +120,18 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	private final JLabel slotsHeadlineType = new JLabel();
+ 	private final JLabel slotsHeadlineMapSlot = new JLabel();
+ 	private final JLabel slotsHeadlineTeam = new JLabel();
++	private final JLabel slotsHeadlineColor = new JLabel();
+ 	private final JTextField chatInputField = new JTextField();
+ 	private final JTextArea chatArea = new JTextArea();
+ 	private final JButton sendChatMessageButton = new JButton();
+ 	private MapLoader mapLoader;
+ 	private final List<PlayerSlot> playerSlots = new ArrayList<>();
+ 	private IPlayerSlotFactory playerSlotFactory;
++	/** The preview image of the map without any decoration. */
++	private BufferedImage previewBase;
++	/** Positions of the start points in the preview image (index = position on the map), <code>null</code> as long as they are unknown. */
++	private int[][] previewStartPoints;
++	private Thread previewStartPointsThread;
+ 
+ 	public JoinGamePanel(JSettlersFrame settlersFrame) {
+ 		this.settlersFrame = settlersFrame;
+@@ -190,6 +208,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		slotsHeadlineType.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_DYNAMIC);
+ 		slotsHeadlineMapSlot.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_DYNAMIC);
+ 		slotsHeadlineTeam.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_DYNAMIC);
++		slotsHeadlineColor.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_DYNAMIC);
+ 		sendChatMessageButton.putClientProperty(ELFStyle.KEY, ELFStyle.BUTTON_MENU);
+ 		chatInputField.putClientProperty(ELFStyle.KEY, ELFStyle.TEXT_DEFAULT);
+ 		chatArea.putClientProperty(ELFStyle.KEY, ELFStyle.PANEL_DARK);
+@@ -211,6 +230,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		slotsHeadlineType.setText(Labels.getString("join-game-panel-player-type"));
+ 		slotsHeadlineMapSlot.setText(Labels.getString("join-game-panel-map-slot"));
+ 		slotsHeadlineTeam.setText(Labels.getString("join-game-panel-team"));
++		slotsHeadlineColor.setText(Labels.getString("join-game-panel-color"));
+ 		sendChatMessageButton.setText(Labels.getString("join-game-panel-send-chat-message"));
+ 	}
+ 
+@@ -236,6 +256,8 @@ public class JoinGamePanel extends BackgroundPanel {
+ 					})
+ 					.toArray(PlayerSetting[]::new);
+ 
++			waitForPreviewStartPoints();
++			PlayerColors.prepareNextGame(determinePlayerColors());
+ 			MapStartResourcesUIWrapper selected = (MapStartResourcesUIWrapper) startResourcesComboBox.getSelectedItem();
+ 			InitialGameState initialGameState = new InitialGameState(playerSlots.get(0).getSlot(), playerSettings, randomSeed, selected.getStartResources());
+ 			applySelectedPeaceTime();
+@@ -272,6 +294,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 					initializeChatFor(connector);
+ 					setStartButtonActionListener(e -> {
+ 						applySelectedPeaceTime();
++						waitForPreviewStartPoints();
+ 						connector.startGame();
+ 					});
+ 					connector.getSlots().setListener(changingSlots -> onSlotsChanged(changingSlots, connector, myId, true));
+@@ -374,6 +397,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 				IMultiplayerSlot remoteSlot = slots.next();
+ 				playerSlot.setCivilisation(remoteSlot.getCivilisation(), false);
+ 				playerSlot.setTeam(remoteSlot.getTeam(), false);
++				playerSlot.setColor(remoteSlot.getColor(), false);
+ 				playerSlot.setSlot(remoteSlot.getPosition(), false);
+ 				IMultiplayerPlayer player = remoteSlot.getPlayer();
+ 				playerSlot.setPlayerType(remoteSlot.getType(), false);
+@@ -414,7 +438,9 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	private void prepareUiFor(MapLoader mapLoader) {
+ 		this.mapLoader = mapLoader;
+ 		mapNameLabel.setText(mapLoader.getMapName());
+-		mapImage.setIcon(new ImageIcon(JSettlersSwingUtil.createBufferedImageFrom(mapLoader)));
++		previewBase = JSettlersSwingUtil.createBufferedImageFrom(mapLoader);
++		previewStartPoints = null;
++		mapImage.setIcon(new ImageIcon(previewBase));
+ 		peaceTimeComboBox.removeAllItems();
+ 		for (EPeaceTime peaceTime : EPeaceTime.values()) {
+ 			peaceTimeComboBox.addItem(peaceTime);
+@@ -428,6 +454,119 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		numberOfPlayersComboBox.reset(mapLoader.getMaxPlayers());
+ 		buildPlayerSlots();
+ 		updateNumberOfPlayerSlots(mapLoader.getMaxPlayers());
++		loadPreviewStartPoints(mapLoader);
++	}
++
++	/**
++	 * Determines the color of every player id (position on the map) from the color selection of the slots.
++	 */
++	private byte[] determinePlayerColors() {
++		byte[] colors = new byte[Math.max(mapLoader.getMaxPlayers(), 1)];
++		for (int i = 0; i < colors.length; i++) {
++			colors[i] = (byte) i;
++		}
++		for (PlayerSlot playerSlot : playerSlots) {
++			if (playerSlot.isAvailable() && playerSlot.getSlot() >= 0 && playerSlot.getSlot() < colors.length) {
++				colors[playerSlot.getSlot()] = playerSlot.getColor();
++			}
++		}
++		return colors;
++	}
++
++	/**
++	 * Reads the start points of the map in the background to show the numbers of the map slots in the preview image.
++	 */
++	private void loadPreviewStartPoints(MapLoader loader) {
++		Thread thread = new Thread(() -> {
++			try {
++				IMapData mapData = loader.getMapData();
++				int maxPlayers = loader.getMaxPlayers();
++				int size = MapFileHeader.PREVIEW_IMAGE_SIZE;
++				int[][] points = new int[maxPlayers][];
++				for (int i = 0; i < maxPlayers; i++) {
++					ShortPoint2D start = mapData.getStartPoint(i);
++					if (start == null) {
++						continue;
++					}
++					int px = Math.min(Math.max((int) ((double) start.x / mapData.getWidth() * size), 0), size - 1);
++					int py = Math.min(Math.max((int) ((double) start.y / mapData.getHeight() * size), 0), size - 1);
++					// same skew as JSettlersSwingUtil.createBufferedImageFrom()
++					int xOffset = Math.max(size - 1 - (py + 1) / 2, 1);
++					points[i] = new int[] { px + xOffset, py };
++				}
++				SwingUtilities.invokeLater(() -> {
++					if (mapLoader == loader) {
++						previewStartPoints = points;
++						refreshPreview();
++					}
++				});
++			} catch (Throwable t) {
++				// no numbers in the preview: maps that can't supply their start points (saved games)
++			}
++		}, "previewStartPoints");
++		thread.setDaemon(true);
++		previewStartPointsThread = thread;
++		thread.start();
++	}
++
++	/**
++	 * The start points are read with the same map loader that is used to start the game, so wait until the reading is finished.
++	 */
++	private void waitForPreviewStartPoints() {
++		Thread thread = previewStartPointsThread;
++		if (thread != null && thread.isAlive()) {
++			try {
++				thread.join(10000);
++			} catch (InterruptedException e) {
++				Thread.currentThread().interrupt();
++			}
++		}
++	}
++
++	/**
++	 * Draws the numbers of the map slots at the start points into the preview image, in the color chosen for the player of the slot.
++	 */
++	private void refreshPreview() {
++		if (previewBase == null) {
++			return;
++		}
++		int[][] points = previewStartPoints;
++		if (points == null) {
++			return;
++		}
++		BufferedImage image = new BufferedImage(previewBase.getWidth(), previewBase.getHeight(), BufferedImage.TYPE_INT_ARGB);
++		Graphics2D g = image.createGraphics();
++		g.drawImage(previewBase, 0, 0, null);
++		g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
++		g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
++		g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 11));
++		FontMetrics metrics = g.getFontMetrics();
++		int radius = 8;
++
++		for (PlayerSlot playerSlot : playerSlots) {
++			if (!playerSlot.isAvailable()) {
++				continue;
++			}
++			int position = playerSlot.getSlot();
++			if (position < 0 || position >= points.length || points[position] == null) {
++				continue;
++			}
++			int cx = points[position][0];
++			int cy = points[position][1];
++			jsettlers.common.Color color = MapDrawContext.getSelectableColor(playerSlot.getColor());
++			g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue()));
++			g.fillOval(cx - radius, cy - radius, 2 * radius, 2 * radius);
++			g.setColor(Color.WHITE);
++			g.setStroke(new BasicStroke(1.5f));
++			g.drawOval(cx - radius, cy - radius, 2 * radius, 2 * radius);
++
++			String text = String.valueOf(position + 1);
++			double brightness = 0.299 * color.getRed() + 0.587 * color.getGreen() + 0.114 * color.getBlue();
++			g.setColor(brightness > 0.6 ? Color.BLACK : Color.WHITE);
++			g.drawString(text, cx - metrics.stringWidth(text) / 2, cy + (metrics.getAscent() - metrics.getDescent()) / 2);
++		}
++		g.dispose();
++		mapImage.setIcon(new ImageIcon(image));
+ 	}
+ 
+ 	private void buildPlayerSlots() {
+@@ -444,6 +583,8 @@ public class JoinGamePanel extends BackgroundPanel {
+ 			PlayerSetting playerSetting = playerSettings[i];
+ 
+ 			playerSlot.setSlot(i, true);
++			playerSlot.setColor(i, true);
++			playerSlot.setPreviewListener(this::refreshPreview);
+ 
+ 			if (playerSetting.getTeamId() != null) {
+ 				playerSlot.setTeam(playerSetting.getTeamId(), true);
+@@ -492,6 +633,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		SwingUtilities.updateComponentTreeUI(playerSlotsPanel);
+ 		SlotToggleGroup slotToggleGroup = new SlotToggleGroup();
+ 		playerSlots.forEach(slotToggleGroup::add);
++		refreshPreview();
+ 	}
+ 
+ 	private void addPlayerSlotHeadline() {
+@@ -524,6 +666,12 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		constraints.gridwidth = 1;
+ 		constraints.fill = GridBagConstraints.HORIZONTAL;
+ 		playerSlotsPanel.add(slotsHeadlineTeam, constraints);
++		constraints = new GridBagConstraints();
++		constraints.gridx = 13;
++		constraints.gridy = 0;
++		constraints.gridwidth = 1;
++		constraints.fill = GridBagConstraints.HORIZONTAL;
++		playerSlotsPanel.add(slotsHeadlineColor, constraints);
+ 	}
+ 
+ 	private enum EPeaceTime {
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/ColorUiWrapper.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/ColorUiWrapper.java
+new file mode 100644
+index 000000000..fa7a0f666
+--- /dev/null
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/ColorUiWrapper.java
+@@ -0,0 +1,29 @@
++package jsettlers.main.swing.menu.joinpanel.slots;
++
++import jsettlers.common.Color;
++import jsettlers.graphics.map.MapDrawContext;
++
++/**
++ * An entry of the color selection of a player slot: a colored bar and the number of the color.
++ */
++public class ColorUiWrapper {
++
++	private final int colorIndex;
++	private final String text;
++
++	public ColorUiWrapper(int colorIndex) {
++		this.colorIndex = colorIndex;
++		Color color = MapDrawContext.getSelectableColor(colorIndex);
++		int rgb = ((int) (color.getRed() * 255) << 16) | ((int) (color.getGreen() * 255) << 8) | (int) (color.getBlue() * 255);
++		this.text = String.format("<html><font color=\"#%06x\">\u25A0\u25A0\u25A0\u25A0</font> %d</html>", rgb, colorIndex + 1);
++	}
++
++	public int getColorIndex() {
++		return colorIndex;
++	}
++
++	@Override
++	public String toString() {
++		return text;
++	}
++}
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+index c1b62582a..2528976f7 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+@@ -17,6 +17,7 @@ package jsettlers.main.swing.menu.joinpanel.slots;
+ import jsettlers.common.ai.EPlayerType;
+ import jsettlers.common.menu.IJoinPhaseMultiplayerGameConnector;
+ import jsettlers.common.player.ECivilisation;
++import jsettlers.common.player.PlayerColors;
+ import jsettlers.graphics.image.SingleImage;
+ import jsettlers.graphics.localization.Labels;
+ import jsettlers.graphics.map.draw.ImageProvider;
+@@ -53,6 +54,7 @@ public class PlayerSlot {
+ 	private final JComboBox<PlayerTypeUiWrapper> typeComboBox = new JComboBox<>();
+ 	private final JComboBox<Byte> slotComboBox = new JComboBox<>();
+ 	private final JComboBox<Byte> teamComboBox = new JComboBox<>();
++	private final JComboBox<ColorUiWrapper> colorComboBox = new JComboBox<>();
+ 	private final JButton readyButton = new JButton();
+ 	private byte oldSlotValue;
+ 	private ISlotListener slotListener;
+@@ -66,6 +68,8 @@ public class PlayerSlot {
+ 	private EPlayerType playerType;
+ 	private byte team;
+ 	private byte slot;
++	private byte color;
++	private Runnable previewListener;
+ 
+ 	public PlayerSlot(byte index) {
+ 		this.index = index;
+@@ -111,6 +115,12 @@ public class PlayerSlot {
+ 		constraints.gridwidth = 1;
+ 		constraints.fill = GridBagConstraints.HORIZONTAL;
+ 		panel.add(teamComboBox, constraints);
++		constraints = new GridBagConstraints();
++		constraints.gridx = 13;
++		constraints.gridy = row + 1;
++		constraints.gridwidth = 1;
++		constraints.fill = GridBagConstraints.HORIZONTAL;
++		panel.add(colorComboBox, constraints);
+ 	}
+ 
+ 	private void setStyle() {
+@@ -120,6 +130,7 @@ public class PlayerSlot {
+ 		readyButton.setMinimumSize(new Dimension(READY_BUTTON_WIDTH, READY_BUTTON_HEIGHT));
+ 		playerNameLabel.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_DYNAMIC);
+ 		teamComboBox.putClientProperty(ELFStyle.KEY, ELFStyle.COMBOBOX);
++		colorComboBox.putClientProperty(ELFStyle.KEY, ELFStyle.COMBOBOX);
+ 		slotComboBox.putClientProperty(ELFStyle.KEY, ELFStyle.COMBOBOX);
+ 		typeComboBox.putClientProperty(ELFStyle.KEY, ELFStyle.COMBOBOX);
+ 		civilisationComboBox.putClientProperty(ELFStyle.KEY, ELFStyle.COMBOBOX);
+@@ -179,6 +190,15 @@ public class PlayerSlot {
+ 				slot = newSlot;
+ 			}
+ 		});
++		colorComboBox.addActionListener(e -> {
++			byte newColor = getColor();
++			if (informGameAboutChanges && newColor != color) {
++				gameToBeInformedAboutChanges.setColor(index, newColor);
++				color = newColor;
++			}
++			firePreviewChanged();
++		});
++		slotComboBox.addActionListener(e -> firePreviewChanged());
+ 		teamComboBox.addActionListener(e -> {
+ 			byte newTeam = getTeam();
+ 			if (informGameAboutChanges && newTeam != team) {
+@@ -206,7 +226,23 @@ public class PlayerSlot {
+ 		}
+ 	}
+ 
++	private void firePreviewChanged() {
++		if (previewListener != null) {
++			previewListener.run();
++		}
++	}
++
++	/**
++	 * Sets a listener that is called when the map slot or the color of this slot changes.
++	 */
++	public void setPreviewListener(Runnable previewListener) {
++		this.previewListener = previewListener;
++	}
++
+ 	private void initializeComboBoxes() {
++		for (int i = 0; i < PlayerColors.SELECTABLE_COLORS; i++) {
++			colorComboBox.addItem(new ColorUiWrapper(i));
++		}
+ 		civilisationComboBox.addItem(new CivilisationUiWrapper());
+ 		for(ECivilisation civ : ECivilisation.values()) civilisationComboBox.addItem(new CivilisationUiWrapper(civ));
+ 	}
+@@ -251,6 +287,24 @@ public class PlayerSlot {
+ 		teamComboBox.setSelectedIndex(team);
+ 	}
+ 
++	public void setColor(byte color, boolean update) {
++		if (!update) {
++			this.color = color;
++		}
++		int index = Math.abs(color) % PlayerColors.SELECTABLE_COLORS;
++		if (colorComboBox.getSelectedIndex() != index) {
++			colorComboBox.setSelectedIndex(index);
++		}
++	}
++
++	public byte getColor() {
++		return (byte) Math.max(colorComboBox.getSelectedIndex(), 0);
++	}
++
++	public void disableColorInput() {
++		colorComboBox.setEnabled(false);
++	}
++
+ 	public void disableTeamInput() {
+ 		teamComboBox.setEnabled(false);
+ 	}
+@@ -296,6 +350,7 @@ public class PlayerSlot {
+ 		slotComboBox.setEnabled(false);
+ 		disableCivilisationInput();
+ 		disableTeamInput();
++		disableColorInput();
+ 		disablePlayerTypeInput();
+ 	}
+ 
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java b/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java
+index f5d8ddcaf..665ccca77 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java
+@@ -115,6 +115,7 @@ public final class NetworkConstants {
+ 		POSITION_CHANGED,
+ 		TYPE_CHANGED,
+ 		PLAYER_COUNT_CHANGED,
++		COLOR_CHANGED,
+ 		;
+ 
+ 		private static final ENetworkMessage[] values = ENetworkMessage.values();
+@@ -171,6 +172,7 @@ public final class NetworkConstants {
+ 		CHANGE_PLAYER_TYPE,
+ 		CHANGE_POSITION,
+ 		CHANGE_PLAYER_COUNT,
++		CHANGE_COLOR,
+ 		;
+ 
+ 		private static final ENetworkKey[] values = ENetworkKey.values();
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java b/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java
+index aa1944645..d64c1dd16 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java
+@@ -169,6 +169,12 @@ public class NetworkClient implements ITaskScheduler, INetworkConnector, INetwor
+ 		channel.sendPacketAsync(ENetworkKey.CHANGE_TEAM, new ByteTuplePacket(slot, team));
+ 	}
+ 
++	@Override
++	public void setColor(byte slot, byte color) throws IllegalStateException {
++		EPlayerState.assertState(state, EPlayerState.IN_MATCH);
++		channel.sendPacketAsync(ENetworkKey.CHANGE_COLOR, new ByteTuplePacket(slot, color));
++	}
++
+ 	@Override
+ 	public void setType(byte slot, byte playerType) throws IllegalStateException {
+ 		EPlayerState.assertState(state, EPlayerState.IN_MATCH);
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java b/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java
+index cb6072caa..c19be0321 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java
+@@ -96,6 +96,8 @@ public interface INetworkClient {
+ 
+ 	void setTeam(byte slot, byte team) throws IllegalStateException;
+ 
++	void setColor(byte slot, byte color) throws IllegalStateException;
++
+ 	void setType(byte slot, byte playerType) throws IllegalStateException;
+ 
+ 	void setPosition(byte slot, byte position) throws IllegalStateException;
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/common/packets/SlotInfoPacket.java b/jsettlers.network/src/main/java/jsettlers/network/common/packets/SlotInfoPacket.java
+index 51e4b4100..dfbe36492 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/common/packets/SlotInfoPacket.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/common/packets/SlotInfoPacket.java
+@@ -12,6 +12,7 @@ public class SlotInfoPacket extends Packet {
+ 	private byte playerType;
+ 	private byte civilisation;
+ 	private byte position;
++	private byte color;
+ 
+ 	public SlotInfoPacket() {
+ 	}
+@@ -21,13 +22,19 @@ public class SlotInfoPacket extends Packet {
+ 		playerType = slot.getType();
+ 		civilisation = slot.getCivilisation();
+ 		position = slot.getPosition();
++		color = slot.getColor();
+ 	}
+ 
+ 	public SlotInfoPacket(byte team, byte playerType, byte civilisation, byte position) {
++		this(team, playerType, civilisation, position, position);
++	}
++
++	public SlotInfoPacket(byte team, byte playerType, byte civilisation, byte position, byte color) {
+ 		this.team = team;
+ 		this.playerType = playerType;
+ 		this.civilisation = civilisation;
+ 		this.position = position;
++		this.color = color;
+ 	}
+ 
+ 	@Override
+@@ -36,6 +43,7 @@ public class SlotInfoPacket extends Packet {
+ 		dos.writeByte(playerType);
+ 		dos.writeByte(civilisation);
+ 		dos.writeByte(position);
++		dos.writeByte(color);
+ 	}
+ 
+ 	@Override
+@@ -44,6 +52,7 @@ public class SlotInfoPacket extends Packet {
+ 		playerType = dis.readByte();
+ 		civilisation = dis.readByte();
+ 		position = dis.readByte();
++		color = dis.readByte();
+ 	}
+ 
+ 	@Override
+@@ -51,12 +60,13 @@ public class SlotInfoPacket extends Packet {
+ 		if (this == o) return true;
+ 		if (o == null || getClass() != o.getClass()) return false;
+ 		SlotInfoPacket that = (SlotInfoPacket) o;
+-		return team == that.team && playerType == that.playerType && civilisation == that.civilisation && position == that.position;
++		return team == that.team && playerType == that.playerType && civilisation == that.civilisation && position == that.position
++				&& color == that.color;
+ 	}
+ 
+ 	@Override
+ 	public int hashCode() {
+-		return Objects.hash(team, playerType, civilisation, position);
++		return Objects.hash(team, playerType, civilisation, position, color);
+ 	}
+ 
+ 	@Override
+@@ -66,6 +76,7 @@ public class SlotInfoPacket extends Packet {
+ 				", playerType=" + playerType +
+ 				", civilisation=" + civilisation +
+ 				", position=" + position +
++				", color=" + color +
+ 				'}';
+ 	}
+ 
+@@ -84,4 +95,8 @@ public class SlotInfoPacket extends Packet {
+ 	public byte getPosition() {
+ 		return position;
+ 	}
++
++	public byte getColor() {
++		return color;
++	}
+ }
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java b/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java
+index 0910b81d5..ab66480a1 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java
+@@ -67,6 +67,8 @@ public interface IServerManager {
+ 
+ 	void setTeamForSlot(Player player, byte slot, byte team);
+ 
++	void setColorForSlot(Player player, byte slot, byte color);
++
+ 	void setPlayerCount(Player player, int playerCount);
+ 
+ 	void sendMatchesToPlayer(Player player);
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java b/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java
+index 47e5747b5..33cdd607b 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java
+@@ -28,6 +28,7 @@ import jsettlers.network.server.listeners.ChangeCivilisationPacketListener;
+ import jsettlers.network.server.listeners.ChangePlayerCountPacketListener;
+ import jsettlers.network.server.listeners.ChangePlayerTypePacketListener;
+ import jsettlers.network.server.listeners.ChangePositionPacketListener;
++import jsettlers.network.server.listeners.ChangeColorPacketListener;
+ import jsettlers.network.server.listeners.ChangeTeamPacketListener;
+ import jsettlers.network.server.listeners.ChatMessageForwardingListener;
+ import jsettlers.network.server.listeners.IdentifyUserListener;
+@@ -96,6 +97,7 @@ public class ServerManager implements IServerManager {
+ 			channel.registerListener(new ChangePlayerTypePacketListener(this, player));
+ 			channel.registerListener(new ChangePositionPacketListener(this, player));
+ 			channel.registerListener(new ChangeTeamPacketListener(this, player));
++			channel.registerListener(new ChangeColorPacketListener(this, player));
+ 			channel.registerListener(new ChangePlayerCountPacketListener(this, player));
+ 
+ 			return true;
+@@ -252,6 +254,18 @@ public class ServerManager implements IServerManager {
+ 		}
+ 	}
+ 
++	@Override
++	public void setColorForSlot(Player player, byte slot, byte color) {
++		try {
++			Match match = verifyAndGetMatch(player);
++
++			match.setSlotColor(slot, color);
++		} catch (IllegalStateException e) {
++			player.sendPacket(NetworkConstants.ENetworkKey.REJECT_PACKET,
++					new RejectPacket(NetworkConstants.ENetworkMessage.INVALID_STATE_ERROR, NetworkConstants.ENetworkKey.CHANGE_COLOR));
++		}
++	}
++
+ 	@Override
+ 	public void setPlayerCount(Player player, int playerCount) {
+ 		try {
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/listeners/ChangeColorPacketListener.java b/jsettlers.network/src/main/java/jsettlers/network/server/listeners/ChangeColorPacketListener.java
+new file mode 100644
+index 000000000..a98f10f30
+--- /dev/null
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/listeners/ChangeColorPacketListener.java
+@@ -0,0 +1,27 @@
++package jsettlers.network.server.listeners;
++
++import java.io.IOException;
++import jsettlers.network.NetworkConstants;
++import jsettlers.network.common.packets.ByteTuplePacket;
++import jsettlers.network.infrastructure.channel.GenericDeserializer;
++import jsettlers.network.infrastructure.channel.listeners.PacketChannelListener;
++import jsettlers.network.server.IServerManager;
++import jsettlers.network.server.match.Player;
++
++public class ChangeColorPacketListener extends PacketChannelListener<ByteTuplePacket> {
++
++	private final IServerManager serverManager;
++	private final Player player;
++
++	public ChangeColorPacketListener(IServerManager serverManager, Player player) {
++		super(NetworkConstants.ENetworkKey.CHANGE_COLOR, new GenericDeserializer<>(ByteTuplePacket.class));
++
++		this.serverManager = serverManager;
++		this.player = player;
++	}
++
++	@Override
++	protected void receivePacket(NetworkConstants.ENetworkKey key, ByteTuplePacket packet) throws IOException {
++		serverManager.setColorForSlot(player, packet.getValueA(), packet.getValueB());
++	}
++}
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java b/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java
+index 47d1f6891..b0acf7f0e 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java
+@@ -367,6 +367,19 @@ public class Match {
+ 		}
+ 	}
+ 
++	public void setSlotColor(byte slotId, byte color) {
++		byte oldColor;
++		synchronized (slots) {
++			Slot slot = getSlot(slotId);
++			oldColor = slot.getColor();
++			slot.setColor(color);
++		}
++
++		if(oldColor != color) {
++			sendMatchInfoUpdate(ENetworkMessage.COLOR_CHANGED, null);
++		}
++	}
++
+ 	public void setPlayerCount(int playerCount) {
+ 		synchronized (players) {
+ 			if(playerCount < players.size()) {
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/match/Slot.java b/jsettlers.network/src/main/java/jsettlers/network/server/match/Slot.java
+index 32e4d8910..fd304539e 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/match/Slot.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/match/Slot.java
+@@ -5,12 +5,14 @@ public class Slot {
+ 	private byte team;
+ 	private byte civilisation;
+ 	private byte position;
++	private byte color;
+ 
+ 	public Slot(byte type, byte team, byte civilisation, byte position) {
+ 		this.type = type;
+ 		this.team = team;
+ 		this.civilisation = civilisation;
+ 		this.position = position;
++		this.color = position;
+ 	}
+ 
+ 	public byte getType() {
+@@ -29,6 +31,14 @@ public class Slot {
+ 		return position;
+ 	}
+ 
++	public byte getColor() {
++		return color;
++	}
++
++	public void setColor(byte color) {
++		this.color = color;
++	}
++
+ 	public void setType(byte type) {
+ 		this.type = type;
+ 	}

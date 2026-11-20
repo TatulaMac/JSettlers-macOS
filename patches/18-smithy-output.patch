@@ -1,5 +1,5 @@
 diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
-index 0eb7c83a2..5dab815c0 100644
+index 0eb7c83a2..12ed49ef6 100644
 --- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
 +++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
 @@ -20,6 +20,7 @@ import java.util.Optional;
@@ -10,7 +10,7 @@ index 0eb7c83a2..5dab815c0 100644
  import jsettlers.common.buildings.IBuilding;
  import jsettlers.common.images.EImageLinkType;
  import jsettlers.common.images.ImageLink;
-@@ -400,21 +401,52 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+@@ -400,21 +401,54 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
  		}
  	}
  
@@ -27,15 +27,17 @@ index 0eb7c83a2..5dab815c0 100644
 +
 +		// The tool and weapon smithies can have many different products lying at the building. Up to 5 buttons stay in one row (with a smaller
 +		// gap if needed). With more, the first row moves up and the rest is placed in rows below it, the last row at the original position.
++		// Other buildings with 4 or 5 stacks (e.g. the laboratory of the Amazons: 2 requested and 2 offered materials) get the smaller gap too,
++		// otherwise the buttons of the requested and the offered materials overlap.
 +		boolean smithy = building.getBuildingVariant().getType() == EBuildingType.TOOLSMITH
 +				|| building.getBuildingVariant().getType() == EBuildingType.WEAPONSMITH;
 +		int perRow = Integer.MAX_VALUE;
 +		if (smithy) {
 +			perRow = SMITHY_BUTTONS_PER_ROW;
-+			if (stacks.size() > 3) {
-+				int inRow = Math.min(stacks.size(), perRow);
-+				buttonSpace = (1 - inRow * buttonWidth) / (inRow + 1);
-+			}
++		}
++		if (stacks.size() > 3 && (smithy || stacks.size() <= SMITHY_BUTTONS_PER_ROW)) {
++			int inRow = Math.min(stacks.size(), SMITHY_BUTTONS_PER_ROW);
++			buttonSpace = (1 - inRow * buttonWidth) / (inRow + 1);
 +		}
 +		int rows = Math.max(1, (stacks.size() + perRow - 1) / perRow);
 +		float rowStep = 1 + SMITHY_ROW_GAP;

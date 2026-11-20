@@ -27,7 +27,7 @@ index d7e8a6f9c..424a393ae 100644
  
  	BuildingVariant getBuildingVariant();
 diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java
-index 1d83319e6..9ab37f238 100644
+index 1d83319e6..b7fd2c587 100644
 --- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java
 +++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BuildingWorkerMovable.java
 @@ -5,6 +5,8 @@ import jsettlers.algorithms.simplebehaviortree.IEMaterialTypeSupplier;
@@ -137,7 +137,7 @@ index 1d83319e6..9ab37f238 100644
  							mov.building.setCannotWork(true);
  							mov.player.showMessage(SimpleMessage.cannotFindWork(mov.building));
  						}
-@@ -308,6 +371,146 @@ public class BuildingWorkerMovable extends CivilianMovable implements IBuildingW
+@@ -308,6 +371,155 @@ public class BuildingWorkerMovable extends CivilianMovable implements IBuildingW
  		);
  	}
  
@@ -176,7 +176,8 @@ index 1d83319e6..9ab37f238 100644
 +	 * <li>Rice: the area follows the nearest swamp that can be planted or harvested within three times the work radius.</li>
 +	 * <li>Bees: like rice, the area follows the nearest place for a hive (grass next to a tree) within twice the work radius.</li>
 +	 * <li>Corn and wine (they work around the building): the area returns to the default center if there is work, otherwise it moves a bit to the
-+	 * side, up to twice the work radius from the default center.</li>
++	 * side, up to twice the work radius from the default center. Vines can only be planted on slopes, so the winegrower
++	 * searches the whole range that is allowed for a work area (almost four work radii from the building).</li>
 +	 * </ul>
 +	 *
 +	 * @param searchType
@@ -234,8 +235,6 @@ index 1d83319e6..9ab37f238 100644
 +			break;
 +		case CUTTABLE_CORN:
 +		case PLANTABLE_CORN:
-+		case HARVESTABLE_WINE:
-+		case PLANTABLE_WINE:
 +			// work around the building: go back to the default center if there is something to do there, otherwise move the area a bit
 +			// to the side (e.g. if the default area is blocked by a building)
 +			if (onlyBigAreas) {
@@ -245,6 +244,16 @@ index 1d83319e6..9ab37f238 100644
 +			limitCenter = home;
 +			searchRadius = 2 * radius;
 +			maxDistance = 2 * radius; // measured from the default center, because that is already some way from the building
++			break;
++		case HARVESTABLE_WINE:
++		case PLANTABLE_WINE:
++			// like corn, but vines can only be planted on slopes, which are rare, so the whole range that is allowed for a work area is searched
++			if (onlyBigAreas) {
++				return false;
++			}
++			homeFirst = true;
++			searchRadius = 4 * radius;
++			maxDistance = 4 * radius - 1; // measured from the building; a work area must be closer than 4 work radii to its building
 +			break;
 +		default:
 +			return false;

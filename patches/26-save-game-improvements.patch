@@ -1,0 +1,358 @@
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
+index 4466ffbda..cc5f6ac62 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
+@@ -51,5 +51,10 @@ public enum EMessageType {
+ 	/**
+ 	 * A building has been finished but its worker cannot be created because there is no free carrier to become the worker.
+ 	 */
+-	NO_FREE_BEARER
++	NO_FREE_BEARER,
++
++	/**
++	 * The game has been saved.
++	 */
++	GAME_SAVED
+ }
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+index c31d09956..ae87d303e 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+@@ -83,6 +83,9 @@ public class SimpleMessage implements IMessage {
+ 
+ 	@Override
+ 	public boolean duplicates(IMessage m) {
++		if (this.type == EMessageType.GAME_SAVED) {
++			return false; // every save is reported, and the message has no position
++		}
+ 		if ((m.getSender() == this.sender)
+ 				&& m.getMessageLabel().equals(this.messageLabel)
+ 				&& m.getType() == this.type) {
+@@ -186,6 +189,15 @@ public class SimpleMessage implements IMessage {
+ 		return new SimpleMessage(EMessageType.NO_FREE_BEARER, "no_free_bearer_soldier|" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
+ 	}
+ 
++	/**
++	 * Creates the message that the game has been saved.
++	 *
++	 * @return The message object
++	 */
++	public static IMessage gameSaved() {
++		return new SimpleMessage(EMessageType.GAME_SAVED, "message_game_saved", (byte) -1, null);
++	}
++
+ 	/**
+ 	 *
+ 	 * @param at
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java b/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java
+index f887f45d1..fc9459489 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/player/PlayerColors.java
+@@ -38,10 +38,34 @@ public final class PlayerColors {
+ 	 * Makes the prepared colors the colors of the running game.
+ 	 */
+ 	public static void applyPrepared() {
+-		set(preparedColors);
++		applyPrepared(null);
++	}
++
++	/**
++	 * Makes the prepared colors the colors of the running game. If no colors were prepared, the given colors (e.g. the colors saved in a saved
++	 * game) are used.
++	 *
++	 * @param colorsIfNotPrepared
++	 * 		The colors to use if no colors were prepared or <code>null</code> for the default colors.
++	 */
++	public static void applyPrepared(byte[] colorsIfNotPrepared) {
++		set(preparedColors != null ? preparedColors : colorsIfNotPrepared);
+ 		preparedColors = null;
+ 	}
+ 
++	/**
++	 * @param playerCount
++	 * 		The number of players.
++	 * @return The index of the color of every player of the running game, to store them in a saved game.
++	 */
++	public static byte[] getCurrentColors(int playerCount) {
++		byte[] colors = new byte[playerCount];
++		for (int i = 0; i < playerCount; i++) {
++			colors[i] = (byte) getColorIndex((byte) i);
++		}
++		return colors;
++	}
++
+ 	public static void reset() {
+ 		colorIndexByPlayerId = null;
+ 	}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index 6333ecca8..cf504ced9 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -528,6 +528,7 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 		case NO_FREE_BEARER:
+ 			return new Color(1f, 0.8f, 0.3f, alpha);
+ 		case MINERALS:
++		case GAME_SAVED:
+ 			return new Color(0.6f, 1f, 0.6f, alpha);
+ 		default:
+ 			return new Color(1, 1, 1, alpha);
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index f56f45d41..eca38c741 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -380,6 +380,7 @@ no_soldier_available_BIG_TOWER = Vaši velkou strážní věž nelze obsadit: ne
+ no_soldier_available_CASTLE = Váš hrad nelze obsadit: není k dispozici žádný voják.
+ message_missing_tool = %s nelze obsadit: chybí nástroj (%s).
+ message_no_free_bearer = %s nelze obsadit: není k dispozici žádný volný osadník.
++message_game_saved = Hra uložena.
+ message_no_free_bearer_soldier = %s nemůže zbrojit: není k dispozici žádný volný osadník.
+ action_firerer_slow = Pozor! Hra reaguje pomalu.
+ 
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 84004a547..424274195 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -386,6 +386,7 @@ no_soldier_available_BIG_TOWER = Your large guard tower can't be occupied: no so
+ no_soldier_available_CASTLE = Your castle can't be occupied: no soldier is available.
+ message_missing_tool = %s can't be occupied: tool missing (%s).
+ message_no_free_bearer = %s can't be occupied: no free settler is available.
++message_game_saved = Game saved.
+ message_no_free_bearer_soldier = %s can't arm soldiers: no free settler is available.
+ action_firerer_slow = Warning! The game is responding slowly.
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+index 27be3242d..3dfc7b1fc 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+@@ -28,6 +28,7 @@ import jsettlers.common.CommonConstants;
+ import jsettlers.common.action.EMoveToType;
+ import jsettlers.common.buildings.IBuilding;
+ import jsettlers.common.map.shapes.HexGridArea;
++import jsettlers.common.menu.messages.SimpleMessage;
+ import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.position.ShortPoint2D;
+ import jsettlers.common.selectable.ISelectable;
+@@ -72,6 +73,7 @@ import jsettlers.logic.movable.interfaces.IFerryMovable;
+ import jsettlers.logic.movable.interfaces.ILogicMovable;
+ import jsettlers.logic.movable.interfaces.IMageMovable;
+ import jsettlers.logic.movable.interfaces.IConvertibleToBearer;
++import jsettlers.logic.player.Player;
+ import jsettlers.network.client.task.packets.TaskPacket;
+ import jsettlers.network.synchronic.timer.ITaskExecutor;
+ 
+@@ -305,6 +307,10 @@ class GuiTaskExecutor implements ITaskExecutor {
+ 	private void save() {
+ 		try {
+ 			grid.save(playerId, guiInterface.getUIState());
++			Player player = grid.getPlayer(playerId);
++			if (player != null) {
++				player.showMessage(SimpleMessage.gameSaved());
++			}
+ 		} catch (IOException | InterruptedException e) {
+ 			e.printStackTrace();
+ 		}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
+index fbd6efb2e..71e7c4054 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
+@@ -22,6 +22,8 @@ import java.util.BitSet;
+ import java.util.Date;
+ import java.util.Locale;
+ import java.util.Set;
++import java.util.UUID;
++import java.nio.charset.StandardCharsets;
+ 
+ import java.util.Optional;
+ import jsettlers.algorithms.borders.BordersThread;
+@@ -427,9 +429,14 @@ public final class MainGrid implements Serializable {
+ 			}
+ 		}
+ 
++		// The id of a saved game depends only on the game and the game time, so all computers of a network game create saves with the same id
++		// (every computer saves when one player saves) and the save can be loaded as a LAN game from each computer.
++		String saveId = UUID.nameUUIDFromBytes((mapId + "|" + MatchConstants.clock().getTime()).getBytes(StandardCharsets.UTF_8)).toString();
++
+ 		return new MapFileHeader(
+ 			MapType.SAVED_SINGLE,
+ 			mapName,
++			saveId,
+ 			mapId,
+ 			"TODO: description",
+ 			width,
+@@ -439,7 +446,7 @@ public final class MainGrid implements Serializable {
+ 			new Date(),
+ 			bgImage,
+ 			playerId
+-		);
++		).withPlayerColors(jsettlers.common.player.PlayerColors.getCurrentColors(playerConfigurations.length));
+ 	}
+ 
+ 	public ConstructionMarksGrid getConstructionMarksGrid() {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/loading/newmap/MapFileHeader.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/loading/newmap/MapFileHeader.java
+index 7df437a50..c9191599c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/loading/newmap/MapFileHeader.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/loading/newmap/MapFileHeader.java
+@@ -55,7 +55,8 @@ public class MapFileHeader {
+ 	private static final short VERSION_DATE_ALWAYS_SAVED = 3;
+ 	private static final short VERSION_PLAYER_CONFIGURATIONS = 4;
+ 	private static final short VERSION_PLAYER_ID = 5;
+-	private static final short VERSION = 5;
++	private static final short VERSION_PLAYER_COLORS = 6;
++	private static final short VERSION = 6;
+ 
+ 	private static final byte[] START_BYTES = new byte[] {
+ 			'M', 'A', 'P', ' '
+@@ -72,6 +73,11 @@ public class MapFileHeader {
+ 	private final short height;
+ 	private final short minPlayers;
+ 	private final PlayerSetting[] playerSettings;
++
++	/**
++	 * The color of every player (index of the selectable color, see PlayerColors) or <code>null</code> if the header has no colors (default colors).
++	 */
++	private byte[] playerColors = null;
+ 	private final Date creationDate;
+ 	private final short[] previewImage;
+ 	private final Byte playerId;
+@@ -96,7 +102,10 @@ public class MapFileHeader {
+ 		this(type, name, UUID.randomUUID().toString(), baseMapId, description, width, height, minPlayers, playerConfigurations, date, previewImage, playerId);
+ 	}
+ 
+-	private MapFileHeader(MapType type, String name, String mapId, String baseMapId, String description, short width, short height, short minPlayers, PlayerSetting[] playerSettings, Date date,
++	/**
++	 * Creates a header with the given unique id. Saved games use this to get the same id on all computers of a network game.
++	 */
++	public MapFileHeader(MapType type, String name, String mapId, String baseMapId, String description, short width, short height, short minPlayers, PlayerSetting[] playerSettings, Date date,
+ 			short[] previewImage, Byte playerId) {
+ 		if (previewImage.length != PREVIEW_IMAGE_SIZE * PREVIEW_IMAGE_SIZE) {
+ 			throw new IllegalArgumentException("bg image has wrong size.");
+@@ -155,6 +164,15 @@ public class MapFileHeader {
+ 		return playerSettings;
+ 	}
+ 
++	public byte[] getPlayerColors() {
++		return playerColors == null ? null : playerColors.clone();
++	}
++
++	public MapFileHeader withPlayerColors(byte[] playerColors) {
++		this.playerColors = playerColors == null ? null : playerColors.clone();
++		return this;
++	}
++
+ 	public Byte getPlayerId() {
+ 		return playerId;
+ 	}
+@@ -184,6 +202,11 @@ public class MapFileHeader {
+ 
+ 		out.writeLong(creationDate.getTime());
+ 		out.writeByte(playerId == null ? -1 : playerId);
++
++		out.writeShort(playerColors == null ? 0 : playerColors.length);
++		if (playerColors != null) {
++			out.write(playerColors);
++		}
+ 		out.flush();
+ 	}
+ 
+@@ -254,7 +277,17 @@ public class MapFileHeader {
+ 				playerId = bytePlayerId == -1 ? null : bytePlayerId;
+ 			}
+ 
+-			return new MapFileHeader(type, mapName, mapId, baseMapId, description, width, height, minPlayers, playerConfigurations, date, bgImage, playerId);
++			byte[] playerColors = null;
++			if (version >= VERSION_PLAYER_COLORS) {
++				int colorCount = in.readShort();
++				if (colorCount > 0) {
++					playerColors = new byte[colorCount];
++					in.readFully(playerColors);
++				}
++			}
++
++			return new MapFileHeader(type, mapName, mapId, baseMapId, description, width, height, minPlayers, playerConfigurations, date, bgImage, playerId)
++					.withPlayerColors(playerColors);
+ 
+ 		} catch (Throwable t) {
+ 			if (t instanceof IOException) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+index a3bba0dd8..176e98d06 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+@@ -100,7 +100,12 @@ public class JSettlersGame {
+ 			boolean controlAll, boolean multiplayer, DataInputStream replayFileInputStream) {
+ 		configureLogging(mapCreator);
+ 
+-		jsettlers.common.player.PlayerColors.applyPrepared();
++		// the colors chosen in the lobby, or the colors stored in a saved game
++		byte[] savedColors = null;
++		if (mapCreator instanceof MapLoader && ((MapLoader) mapCreator).getFileHeader() != null) {
++			savedColors = ((MapLoader) mapCreator).getFileHeader().getPlayerColors();
++		}
++		jsettlers.common.player.PlayerColors.applyPrepared(savedColors);
+ 		this.initialGameState = initialGameState;
+ 
+ 		System.out.println("OS version: " + System.getProperty("os.name") + " " + System.getProperty("os.arch") + " "
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index 8fd1274e7..78a923ada 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -640,6 +640,17 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		return (byte) teams.indexOf(team != null ? team : (byte) savedGamePositions[slot]);
+ 	}
+ 
++	/**
++	 * @return The color the player at the given position had in the saved game.
++	 */
++	private byte savedGameColor(int position) {
++		byte[] savedColors = mapLoader.getFileHeader().getPlayerColors();
++		if (savedColors != null && position >= 0 && position < savedColors.length) {
++			return savedColors[position];
++		}
++		return (byte) position;
++	}
++
+ 	private void buildSavedGamePlayerSlots() {
+ 		PlayerSetting[] settings = mapLoader.getFileHeader().getPlayerSettings();
+ 		playerSlots.clear();
+@@ -650,7 +661,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 			int position = savedGamePositions[i];
+ 			PlayerSetting setting = settings[position];
+ 			playerSlot.setSlot((byte) position, true);
+-			playerSlot.setColor((byte) position, true);
++			playerSlot.setColor(savedGameColor(position), true);
+ 			playerSlot.setPreviewListener(this::refreshPreview);
+ 			playerSlot.setTeam(savedGameTeamNumber(settings, i), true);
+ 			if (setting.getCivilisation() != null) {
+@@ -677,7 +688,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 				connector.setCivilisation(i, setting.getCivilisation());
+ 			}
+ 			connector.setTeam(i, savedGameTeamNumber(settings, i));
+-			connector.setColor(i, (byte) position);
++			connector.setColor(i, savedGameColor(position));
+ 			if (i > 0 && setting.getPlayerType() != null) { // the first slot is the host
+ 				connector.setType(i, setting.getPlayerType());
+ 			}
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/MapListCellRenderer.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/MapListCellRenderer.java
+index d7b309f40..33e0111a2 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/MapListCellRenderer.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/openpanel/MapListCellRenderer.java
+@@ -130,6 +130,11 @@ public class MapListCellRenderer implements ListCellRenderer<MapLoader> {
+ 	 */
+ 	private final SimpleDateFormat df = new SimpleDateFormat(Labels.getString("date.date-only"));
+ 
++	/**
++	 * Format for the time that is shown after the date, so saved games of the same day can be told apart.
++	 */
++	private final SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss");
++
+ 	/**
+ 	 * Cache for preview images
+ 	 */
+@@ -213,7 +218,7 @@ public class MapListCellRenderer implements ListCellRenderer<MapLoader> {
+ 		mapNameLabel.setText(value.getMapName());
+ 		String date = "???";
+ 		if (value.getCreationDate() != null) {
+-			date = df.format(value.getCreationDate());
++			date = df.format(value.getCreationDate()) + " " + timeFormat.format(value.getCreationDate());
+ 		}
+ 
+ 		mapIdLabel.setText(date + " / " + value.getMapId());

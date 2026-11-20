@@ -35,7 +35,7 @@ index 3aaa34bf2..6333ecca8 100644
  			return buildingNameOf(label.substring("cannot_find_work_".length())) + ": no work found in its work area.";
  		} else if (label.startsWith("no_soldier_available_")) {
 diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
-index ba7c4b285..58ad179d7 100644
+index be81af342..c65076796 100644
 --- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
 +++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
 @@ -379,7 +379,8 @@ no_soldier_available_TOWER = Vaši strážní věž nelze obsadit: není k dispo
@@ -110,11 +110,35 @@ index ee2287608..7045270c8 100644
  	@Override
  	public void bearerRequestFailed() {
  		super.grid.requestSoldierable(this);
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
+index 3b73e13d5..4a35703a3 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/occupying/OccupyingBuilding.java
+@@ -189,6 +189,9 @@ public class OccupyingBuilding extends Building implements IBuilding.IOccupied,
+ 	 * Tells the player when this building has been waiting for its first soldier for a long time (nobody in reach to occupy it).
+ 	 */
+ 	private void warnIfNoSoldierAvailable() {
++		if (isDestroyed()) {
++			return;
++		}
+ 		if (sortedOccupiers.isEmpty() && comingSoldiers.isEmpty() && !searchedSoldiers.isEmpty()) {
+ 			unoccupiedTicks++;
+ 			if (unoccupiedTicks == NO_SOLDIER_WARNING_TICKS
 diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
-index fd332444d..c11854a00 100644
+index fd332444d..041fcd03b 100644
 --- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
 +++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
-@@ -315,10 +315,15 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+@@ -293,6 +293,9 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 
+ 	private void handleWorkerRequest() {
+ 		WorkerRequest workerRequest = workerRequests.poll();
++		if (workerRequest != null && !workerRequest.isRequestAlive()) {
++			return; // the building does not exist any more: forget the request
++		}
+ 		if (workerRequest != null) {
+ 			IManageableWorker worker = joblessWorkers.removeObjectNextTo(workerRequest.getPosition(), currentWorker -> currentWorker.getMovableType() == workerRequest.movableType);
+ 
+@@ -315,10 +318,15 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
  	private void handleWorkerCreationRequests() {
  		Iterator<WorkerCreationRequest> iterator = workerCreationRequests.iterator();
  
@@ -134,9 +158,13 @@ index fd332444d..c11854a00 100644
  					WorkerRequest workerRequest = (WorkerRequest) request;
  					workerRequest.warnPlayer(SimpleMessage.noFreeBearer(workerRequest.building));
  				}
-@@ -382,13 +387,32 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+@@ -381,14 +389,36 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 
  	private void handleSoldierCreationRequest() {
  		SoldierCreationRequest soilderRequest = soldierCreationRequests.poll();
++		if (soilderRequest != null && soilderRequest.getBarrack().isDestroyed()) {
++			return; // the barrack does not exist any more: forget the request, so there are no more messages about it
++		}
  		if (soilderRequest != null) {
 -			IManageableBearer manageableBearer = joblessBearer.removeObjectNextTo(soilderRequest.getPosition());
 -			if (manageableBearer == null || !manageableBearer.becomeSoldier(soilderRequest.getBarrack())) {
@@ -169,7 +197,7 @@ index fd332444d..c11854a00 100644
  	private void handleDiggerRequest() {
  		DiggerRequest request = diggerRequests.peek();
  		if (request == null) {
-@@ -463,6 +487,37 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+@@ -463,6 +493,37 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
  			}
  		}
  
@@ -237,10 +265,10 @@ index 05b6fd0d1..b875c3158 100644
  	}
  }
 diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java
-index ffefc09c4..896d7ce71 100644
+index ffefc09c4..8721f637f 100644
 --- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java
 +++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IBarrack.java
-@@ -49,4 +49,15 @@ public interface IBarrack extends ILocatable {
+@@ -49,4 +49,20 @@ public interface IBarrack extends ILocatable {
  	 * @return Returns the position where the newly created soldier should walk.
  	 */
  	ShortPoint2D getSoldierTargetPosition();
@@ -255,6 +283,11 @@ index ffefc09c4..896d7ce71 100644
 +	 * Called when a free settler has been found, so the next shortage is announced again after the usual delay.
 +	 */
 +	void clearNoFreeSettlerWarning();
++
++	/**
++	 * @return True if the barrack does not exist any more (it was destroyed or conquered). Requests of such a barrack are dropped.
++	 */
++	boolean isDestroyed();
  }
 diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BearerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BearerMovable.java
 index 836b7a918..ebc3d4a9e 100644

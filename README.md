@@ -6,7 +6,7 @@
 > This project is not affiliated with, endorsed by or supported by Ubisoft, Blue Byte or the upstream JSettlers project.
 > The game data (graphics and sound) of *The Settlers III* is **not included** - you need your own copy (see below).
 
-Current version: **0.6.3-alpha** (alpha: expect bugs; saved games may become invalid in future versions).
+Current version: **0.6.4-alpha** (alpha: expect bugs; saved games may become invalid in future versions).
 See the [changelog](CHANGELOG.md) for everything that differs from upstream.
 
 ## What you need
@@ -17,7 +17,7 @@ See the [changelog](CHANGELOG.md) for everything that differs from upstream.
   Tested with the GOG version 1.60 data.
 
 ## Installation
-1. Download `JSettlers-macOS-v0.6.3-alpha-arm64.dmg` from the [Releases](../../releases) page.
+1. Download `JSettlers-macOS-v0.6.4-alpha-arm64.dmg` from the [Releases](../../releases) page.
 2. Open the DMG and drag **JSettlers** to the **Applications** folder.
 3. Start JSettlers. macOS may say the app is damaged or from an unidentified developer. It is not signed by Apple (it is signed ad hoc),
    so you have to allow it once. Do **one** of these:
@@ -80,7 +80,17 @@ better colours, otherwise a built-in enlarger is used.
 - The **zoom** is shown at the top right, left of the frame rate (100% = original size, one image pixel per screen pixel).
 - Click on a message at the bottom of the screen to jump to the place it is about.
 - LAN game: the host opens the LAN tab, clicks "Start local server" and creates a game; the others see it in the list.
-  All players must use the same version.
+  All players must use the same version (0.6.4-alpha changed the network protocol, so it cannot play with older versions).
+- **Player colors:** in the lobby (single player and LAN) every player has a **Color** selection in the last column of the player list; the colors
+  are sent to the other players and used in the game. The preview map shows the numbers of the start positions.
+- **Load a saved game in LAN:** the host opens the LAN tab, chooses **Load game** next to **New match** and selects a saved game. Position, nation and team
+  are fixed by the save; human/computer can be changed. **Every player needs the same save file** (when one player saves in a network game, every
+  computer saves it, so each player finds it in his own folder of saved games). A player who does not have the file gets a message instead of joining.
+  Single player and multiplayer saves can be loaded in both. The list of games shows the date **and time** of a save; a save remembers the player colors.
+- **Chat in network games:** press **Enter** (or click the chat button of the minimap) to write a message, **Enter** sends it, **Escape** cancels.
+  The message appears for all players with the name and in the color of the sender.
+- **Shared player (experimental, LAN only):** players who choose the same color **and** the same nation play together as one player and share the
+  position. Remove patch 25 from the script if this causes trouble.
 - The upstream [manual](https://github.com/jsettlers/settlers-remake/wiki/JSettlers-Manual) describes the controls.
 
 ## Reporting bugs
@@ -92,8 +102,14 @@ This build is [PR #92](https://github.com/paulwedeck/settlers-remake/pull/92) (A
 [`patches`](patches), listed in the [changelog](CHANGELOG.md): LAN multiplayer on macOS, readable bigger text, building costs in the build menu,
 useful messages, correct game speed, better soldier behavior, fixes for the "Gifts of the gods" spell, end-of-game statistics,
 the Amazon and Asian storage/market buildings, a language selection (English, Czech), thief fixes, a zoom indicator, control groups
-(Control + number), a selectable peace time, optional HD graphics, an automatic work area, faster growth of crops and more messages
-about missing tools and settlers.
+(Control + number), a selectable peace time, optional HD graphics, an automatic work area, faster growth of crops, more messages
+about missing tools and settlers, and a much better LAN lobby (player colors, loading saved games, in-game chat, a shared player, the peace time
+shown to all players).
+
+## Other platforms
+Only the macOS build (Apple Silicon) is built and tested here. The patches change the shared game code and the desktop (Swing) user interface, so the
+source code should also build for Windows and Linux with the normal upstream instructions, but this is untested. The Android app has its own menus:
+the new lobby features (colors, loading a saved game, chat) do not appear there, and a 0.6.4-alpha network game is not compatible with other versions.
 
 ## Building it yourself
 You need a Mac with Apple Silicon, git, Xcode command line tools and JDK 17 (`brew install --cask temurin@17`).

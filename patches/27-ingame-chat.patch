@@ -1,0 +1,964 @@
+diff --git a/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java b/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java
+index 859fdf9da..58dfdd61d 100644
+--- a/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java
++++ b/go.graphics.swing/src/main/java/go/graphics/swing/event/swingInterpreter/GOSwingEventConverter.java
+@@ -14,6 +14,7 @@
+  *******************************************************************************/
+ package go.graphics.swing.event.swingInterpreter;
+ 
++import go.graphics.event.TextInput;
+ import java.awt.Component;
+ import java.awt.GraphicsConfiguration;
+ import java.awt.GraphicsDevice;
+@@ -174,12 +175,50 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 		}
+ 	}
+ 
++	private volatile boolean enterHeld = false;
++
+ 	@Override
+ 	public void keyPressed(KeyEvent e) {
+ 		updateModifiers(e);
+ 		if (isModifierKey(e)) {
+ 			return; // a modifier key alone is no key event, it would block the next key (e.g. Control + 1) until it is released
+ 		}
++		if (e.getKeyCode() == KeyEvent.VK_ENTER) {
++			// Enter starts and finishes the text input (chat); a held key must not do both
++			if (enterHeld) {
++				return;
++			}
++			TextInput.Listener enterListener = TextInput.getListener();
++			if (enterListener != null) {
++				enterHeld = true;
++				enterListener.enterPressed();
++				return;
++			}
++			if (!isKeyEventOngoing() && TextInput.start()) {
++				enterHeld = true;
++				return;
++			}
++		}
++		TextInput.Listener textInput = TextInput.getListener();
++		if (textInput != null) {
++			// the keyboard is used to type text: only the keys that edit or finish the text are handled, the others are typed (keyTyped)
++			if (!isKeyEventOngoing()) { // the key that started the text input may still be held down
++				switch (e.getKeyCode()) {
++				case KeyEvent.VK_ENTER:
++					textInput.enterPressed();
++					break;
++				case KeyEvent.VK_ESCAPE:
++					textInput.escapePressed();
++					break;
++				case KeyEvent.VK_BACK_SPACE:
++					textInput.backspacePressed();
++					break;
++				default:
++					break;
++				}
++			}
++			return;
++		}
+ 		String text = getKeyName(e);
+ 		startKeyEvent(text);
+ 		/*
+@@ -271,6 +310,9 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 			case KeyEvent.VK_TAB:
+ 				text = "TAB";
+ 				break;
++			case KeyEvent.VK_ENTER:
++				text = "\n";
++				break;
+ 			default:
+ 				text = "" + e.getKeyChar();
+ 			}
+@@ -281,6 +323,9 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 	@Override
+ 	public void keyReleased(KeyEvent e) {
+ 		updateModifiers(e);
++		if (e.getKeyCode() == KeyEvent.VK_ENTER) {
++			enterHeld = false;
++		}
+ 		if (isModifierKey(e)) {
+ 			return;
+ 		}
+@@ -295,6 +340,13 @@ public class GOSwingEventConverter extends AbstractEventConverter
+ 
+ 	@Override
+ 	public void keyTyped(KeyEvent e) {
++		TextInput.Listener textInput = TextInput.getListener();
++		if (textInput != null && !isKeyEventOngoing()) {
++			char character = e.getKeyChar();
++			if (character != KeyEvent.CHAR_UNDEFINED && !Character.isISOControl(character)) {
++				textInput.characterTyped(character);
++			}
++		}
+ 	}
+ 
+ 	@Override
+diff --git a/go.graphics/src/main/java/go/graphics/event/TextInput.java b/go.graphics/src/main/java/go/graphics/event/TextInput.java
+new file mode 100644
+index 000000000..3ad42e9f1
+--- /dev/null
++++ b/go.graphics/src/main/java/go/graphics/event/TextInput.java
+@@ -0,0 +1,82 @@
++package go.graphics.event;
++
++/**
++ * Lets a part of the user interface take over the keyboard to type text (for example the chat of a network game).
++ * <p>
++ * While a {@link Listener} is registered, the keyboard does not trigger the usual key events (hotkeys); the typed characters and the keys Enter,
++ * Escape and Backspace are passed to the listener instead.
++ */
++public final class TextInput {
++	/**
++	 * Receives the typed text.
++	 */
++	public interface Listener {
++		/**
++		 * A printable character was typed.
++		 */
++		void characterTyped(char character);
++
++		/**
++		 * Backspace was pressed.
++		 */
++		void backspacePressed();
++
++		/**
++		 * Enter was pressed: the text is finished.
++		 */
++		void enterPressed();
++
++		/**
++		 * Escape was pressed: the text is cancelled.
++		 */
++		void escapePressed();
++	}
++
++	private static volatile Listener listener = null;
++	private static volatile Runnable starter = null;
++
++	private TextInput() {
++	}
++
++	/**
++	 * Registers the listener that gets the typed text, or removes the current one if <code>null</code> is given.
++	 */
++	public static void setListener(Listener newListener) {
++		listener = newListener;
++	}
++
++	/**
++	 * @return The listener that gets the typed text, or <code>null</code> if the keyboard works as usual.
++	 */
++	public static Listener getListener() {
++		return listener;
++	}
++
++	/**
++	 * Registers the action that starts the text input when the Enter key is pressed, or removes the current one if <code>null</code> is given.
++	 */
++	public static void setStarter(Runnable newStarter) {
++		starter = newStarter;
++	}
++
++	/**
++	 * Starts the text input, if a starter is registered.
++	 *
++	 * @return True if a starter was registered (and called).
++	 */
++	public static boolean start() {
++		Runnable current = starter;
++		if (current == null) {
++			return false;
++		}
++		current.run();
++		return true;
++	}
++
++	/**
++	 * @return True if the keyboard is currently used to type text.
++	 */
++	public static boolean isActive() {
++		return listener != null;
++	}
++}
+diff --git a/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java b/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java
+index eb00550a7..c5ee2ec9d 100644
+--- a/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java
++++ b/go.graphics/src/main/java/go/graphics/event/interpreter/AbstractEventConverter.java
+@@ -229,6 +229,13 @@ public class AbstractEventConverter {
+ 		}
+ 	}
+ 
++	/**
++	 * @return True if a key is currently held that started a key event.
++	 */
++	protected synchronized boolean isKeyEventOngoing() {
++		return ongoingKeyEvent != null;
++	}
++
+ 	protected synchronized void endKeyEvent(String string) {
+ 		if (ongoingKeyEvent != null) {
+ 			ongoingKeyEvent.released();
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/ChatAction.java b/jsettlers.common/src/main/java/jsettlers/common/action/ChatAction.java
+new file mode 100644
+index 000000000..03976f248
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/ChatAction.java
+@@ -0,0 +1,21 @@
++package jsettlers.common.action;
++
++/**
++ * Action to send a chat message: {@link EActionType#SEND_CHAT_MESSAGE}.
++ */
++public class ChatAction extends Action {
++	private final String text;
++
++	/**
++	 * @param text
++	 *            The text of the message.
++	 */
++	public ChatAction(String text) {
++		super(EActionType.SEND_CHAT_MESSAGE);
++		this.text = text;
++	}
++
++	public String getText() {
++		return text;
++	}
++}
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+index 5f7931c95..a38735db4 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+@@ -127,6 +127,18 @@ public enum EActionType {
+ 	 */
+ 	RECALL_GROUP,
+ 
++	/**
++	 * Starts typing a chat message (network games only).
++	 */
++	OPEN_CHAT,
++
++	/**
++	 * Sends a chat message to the other players of a network game.
++	 *
++	 * @see ChatAction
++	 */
++	SEND_CHAT_MESSAGE,
++
+ 	/**
+ 	 * Sets the screen to display current message.
+ 	 */
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/IInGameChat.java b/jsettlers.common/src/main/java/jsettlers/common/menu/IInGameChat.java
+new file mode 100644
+index 000000000..478ec2e7d
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/IInGameChat.java
+@@ -0,0 +1,41 @@
++package jsettlers.common.menu;
++
++/**
++ * The chat between the players of a network game, while the game is running.
++ */
++public interface IInGameChat {
++	/**
++	 * Receives the chat messages of all players (including the own ones).
++	 */
++	interface IReceiver {
++		/**
++		 * @param playerId
++		 *            The id of the player in the game (gives the color), or -1 if the sender is not known.
++		 * @param playerName
++		 *            The name of the sender.
++		 * @param text
++		 *            The text of the message.
++		 */
++		void chatMessageReceived(byte playerId, String playerName, String text);
++	}
++
++	/**
++	 * Sends a message to all players of the game.
++	 */
++	void sendMessage(String text);
++
++	/**
++	 * Sets the receiver of the messages, <code>null</code> to remove it.
++	 */
++	void setReceiver(IReceiver receiver);
++
++	/**
++	 * @return The id of the own player in the game.
++	 */
++	byte getOwnPlayerId();
++
++	/**
++	 * @return The name of the own player.
++	 */
++	String getOwnPlayerName();
++}
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/IMapInterfaceConnector.java b/jsettlers.common/src/main/java/jsettlers/common/menu/IMapInterfaceConnector.java
+index f15a38315..d7384e9c8 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/IMapInterfaceConnector.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/IMapInterfaceConnector.java
+@@ -84,4 +84,15 @@ public interface IMapInterfaceConnector extends IMessenger {
+ 	void fireAction(IAction action);
+ 
+ 	void playSound(int soundId, float volume);
++
++	/**
++	 * Allows the user to write chat messages (network games).
++	 *
++	 * @param ownPlayerId
++	 *            The id of the own player in the game, this gives the color of the own messages.
++	 * @param ownPlayerName
++	 *            The name of the own player.
++	 */
++	default void enableChat(byte ownPlayerId, String ownPlayerName) {
++	}
+ }
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
+index cc5f6ac62..49d0e0b8f 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java
+@@ -56,5 +56,10 @@ public enum EMessageType {
+ 	/**
+ 	 * The game has been saved.
+ 	 */
+-	GAME_SAVED
++	GAME_SAVED,
++
++	/**
++	 * A general information for the user, the label is a key of the language files.
++	 */
++	INFO
+ }
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/IMessage.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/IMessage.java
+index 5807ba551..e34f6d7bc 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/IMessage.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/IMessage.java
+@@ -64,6 +64,15 @@ public interface IMessage {
+ 	 */
+ 	byte getSender();
+ 
++	/**
++	 * Gets the name of the sender of a chat message.
++	 *
++	 * @return The name or <code>null</code> if the message has no sender name (then the name is derived from {@link #getSender()}).
++	 */
++	default String getSenderName() {
++		return null;
++	}
++
+ 	/**
+ 	 * gets the position where the event occured.
+ 	 * 
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+index ae87d303e..8ce2b84df 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/messages/SimpleMessage.java
+@@ -28,6 +28,7 @@ public class SimpleMessage implements IMessage {
+ 	private final ShortPoint2D pos;
+ 	private final String messageLabel;
+ 	private final EMessageType type;
++	private final String senderName;
+ 	private int age;
+ 
+ 	/**
+@@ -43,6 +44,11 @@ public class SimpleMessage implements IMessage {
+ 	 * 		The position the messageLabel was sent from.
+ 	 */
+ 	private SimpleMessage(EMessageType type, String messageLabel, byte sender, ShortPoint2D pos) {
++		this(type, messageLabel, sender, null, pos);
++	}
++
++	private SimpleMessage(EMessageType type, String messageLabel, byte sender, String senderName, ShortPoint2D pos) {
++		this.senderName = senderName;
+ 		this.type = type;
+ 		this.messageLabel = messageLabel;
+ 		this.sender = sender;
+@@ -76,6 +82,11 @@ public class SimpleMessage implements IMessage {
+ 		return sender;
+ 	}
+ 
++	@Override
++	public String getSenderName() {
++		return senderName;
++	}
++
+ 	@Override
+ 	public ShortPoint2D getPosition() {
+ 		return pos;
+@@ -83,8 +94,8 @@ public class SimpleMessage implements IMessage {
+ 
+ 	@Override
+ 	public boolean duplicates(IMessage m) {
+-		if (this.type == EMessageType.GAME_SAVED) {
+-			return false; // every save is reported, and the message has no position
++		if (this.type == EMessageType.GAME_SAVED || this.type == EMessageType.INFO || this.type == EMessageType.CHAT) {
++			return false; // these messages are always shown and have no position
+ 		}
+ 		if ((m.getSender() == this.sender)
+ 				&& m.getMessageLabel().equals(this.messageLabel)
+@@ -189,6 +200,32 @@ public class SimpleMessage implements IMessage {
+ 		return new SimpleMessage(EMessageType.NO_FREE_BEARER, "no_free_bearer_soldier|" + building.getBuildingVariant().getType(), (byte) -1, building.getPosition());
+ 	}
+ 
++	/**
++	 * Creates a chat message of a player of a network game.
++	 *
++	 * @param sender
++	 * 		The id of the player in the game, this gives the color of the message.
++	 * @param senderName
++	 * 		The name of the player.
++	 * @param text
++	 * 		The text the player wrote.
++	 * @return The message object
++	 */
++	public static IMessage chat(byte sender, String senderName, String text) {
++		return new SimpleMessage(EMessageType.CHAT, text, sender, senderName, null);
++	}
++
++	/**
++	 * Creates a general information for the user.
++	 *
++	 * @param label
++	 * 		The key of the text in the language files.
++	 * @return The message object
++	 */
++	public static IMessage info(String label) {
++		return new SimpleMessage(EMessageType.INFO, label, (byte) -1, null);
++	}
++
+ 	/**
+ 	 * Creates the message that the game has been saved.
+ 	 *
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index cf504ced9..409485cb4 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -33,6 +33,7 @@ import go.graphics.event.GOEvent;
+ import go.graphics.event.GOEventHandler;
+ import go.graphics.event.GOKeyEvent;
+ import go.graphics.event.GOModalEventHandler;
++import go.graphics.event.TextInput;
+ import go.graphics.event.command.EModifier;
+ import go.graphics.event.command.GOCommandEvent;
+ import go.graphics.event.mouse.GODrawEvent;
+@@ -48,6 +49,7 @@ import jsettlers.common.Color;
+ import jsettlers.common.CommitInfo;
+ import jsettlers.common.CommonConstants;
+ import jsettlers.common.action.Action;
++import jsettlers.common.action.ChatAction;
+ import jsettlers.common.action.EActionType;
+ import jsettlers.common.action.GroupAction;
+ import jsettlers.common.action.IAction;
+@@ -96,6 +98,7 @@ import jsettlers.graphics.map.draw.Background;
+ import jsettlers.graphics.map.draw.DrawConstants;
+ import jsettlers.graphics.map.draw.ImageProvider;
+ import jsettlers.graphics.map.draw.MapObjectDrawer;
++import jsettlers.common.menu.messages.SimpleMessage;
+ import jsettlers.graphics.messages.Messenger;
+ import jsettlers.graphics.sound.BackgroundSound;
+ import jsettlers.graphics.sound.MusicManager;
+@@ -492,8 +495,11 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 	 */
+ 	private static String getMessageText(IMessage m) {
+ 		String label = m.getMessageLabel();
++		if (m.getType() == EMessageType.CHAT) {
++			return label; // the text the player wrote
++		}
+ 		String text = Labels.getString(label);
+-		if (m.getType() == EMessageType.CHAT || !text.equals(label)) {
++		if (!text.equals(label)) {
+ 			return text;
+ 		}
+ 		if (label.startsWith("missing_tool|")) {
+@@ -563,28 +569,145 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 			float y = offsetY + messageIndex * lineHeight * yDirection;
+ 			float a = messageAlpha(m);
+ 			float startX = x;
+-			if (m.getSender() >= 0) {
+-				String name = getPlayername(m.getSender()) + ":";
+-				Color color = MapDrawContext.getPlayerColor(m.getSender());
+-				float width = drawer.getWidth(name);
+-				for (int i = -1; i < 3; i++) {
+-					drawer.drawString(x + i, y - 1, new Color(1, 1, 1, a/2), name);
+-				}
+-				drawer.drawString(x, y, new Color(color.getRed(), color.getGreen(), color.getBlue(), a), name);
+-				x += width + 10;
++			if (m.getSender() >= 0 || m.getSenderName() != null) {
++				String name = (m.getSenderName() != null ? m.getSenderName() : getPlayername(m.getSender())) + ":";
++				x += drawOutlinedText(drawer, x, y, getPlayerMessageColor(m.getSender(), a), a, name) + 10;
+ 			}
+ 
+ 			String text = getMessageText(m);
+-			drawer.drawString(x, y, getMessageColor(m, a), text);
++			if (m.getType() == EMessageType.CHAT) {
++				// chat messages have the color of the player who wrote them
++				drawOutlinedText(drawer, x, y, getPlayerMessageColor(m.getSender(), a), a, text);
++			} else {
++				drawer.drawString(x, y, getMessageColor(m, a), text);
++			}
+ 			if (m.getPosition() != null) {
+ 				areas.add(new MessageArea(startX, y - lineHeight * 0.2f, x - startX + drawer.getWidth(text), lineHeight, m.getPosition()));
+ 			}
+ 
+ 			messageIndex++;
+ 		}
++
++		if (chatTyping) {
++			// the message the user is writing, in the color of the own player
++			float y = offsetY + messageIndex * lineHeight * yDirection;
++			String name = chatPlayerName + ":";
++			Color color = getPlayerMessageColor(chatPlayerId, 1f);
++			float x = offsetX + drawOutlinedText(drawer, offsetX, y, color, 1f, name) + 10;
++			String typed;
++			synchronized (chatInput) {
++				typed = chatInput.toString();
++			}
++			drawOutlinedText(drawer, x, y, color, 1f, typed + ((System.currentTimeMillis() / 500) % 2 == 0 ? "_" : " "));
++		}
+ 		messageAreas = areas.toArray(new MessageArea[0]);
+ 	}
+ 
++	private static Color getPlayerMessageColor(byte playerId, float alpha) {
++		if (playerId < 0) {
++			return new Color(1, 1, 1, alpha);
++		}
++		Color color = MapDrawContext.getPlayerColor(playerId);
++		return new Color(color.getRed(), color.getGreen(), color.getBlue(), alpha);
++	}
++
++	/**
++	 * Draws a text with a dark shadow, so that it can be read in every player color. The shadow has the same transparency as the text, so that both
++	 * fade together (the text drawer discards everything that is less than half opaque).
++	 *
++	 * @return The width of the text.
++	 */
++	private static float drawOutlinedText(TextDrawer drawer, float x, float y, Color color, float alpha, String text) {
++		drawer.drawString(x + 1, y - 1, new Color(0, 0, 0, alpha), text);
++		drawer.drawString(x, y, color, text);
++		return drawer.getWidth(text);
++	}
++
++	// ---- chat of network games ----
++
++	private static final int CHAT_MAX_LENGTH = 100;
++
++	private volatile boolean chatEnabled = false;
++	private volatile boolean chatTyping = false;
++	private volatile byte chatPlayerId = -1;
++	private volatile String chatPlayerName = "";
++	private final StringBuilder chatInput = new StringBuilder();
++
++	private final TextInput.Listener chatInputListener = new TextInput.Listener() {
++		@Override
++		public void characterTyped(char character) {
++			synchronized (chatInput) {
++				if (chatInput.length() < CHAT_MAX_LENGTH) {
++					chatInput.append(character);
++				}
++			}
++		}
++
++		@Override
++		public void backspacePressed() {
++			synchronized (chatInput) {
++				if (chatInput.length() > 0) {
++					chatInput.setLength(chatInput.length() - 1);
++				}
++			}
++		}
++
++		@Override
++		public void enterPressed() {
++			String text;
++			synchronized (chatInput) {
++				text = chatInput.toString().trim();
++			}
++			stopChatInput();
++			if (!text.isEmpty()) {
++				getInterfaceConnector().fireAction(new ChatAction(text));
++			}
++		}
++
++		@Override
++		public void escapePressed() {
++			stopChatInput();
++		}
++	};
++
++	/**
++	 * Allows the user to write chat messages.
++	 */
++	public void enableChat(byte ownPlayerId, String ownPlayerName) {
++		this.chatPlayerId = ownPlayerId;
++		this.chatPlayerName = ownPlayerName != null ? ownPlayerName : "";
++		this.chatEnabled = true;
++		TextInput.setStarter(this::startChatInput);
++	}
++
++	/**
++	 * Starts typing a chat message: the keyboard is used for the text until Enter or Escape is pressed.
++	 */
++	private void startChatInput() {
++		if (!chatEnabled) {
++			synchronized (messenger) {
++				messenger.addMessage(SimpleMessage.info("message_chat_only_in_network_games"));
++			}
++			return;
++		}
++		synchronized (chatInput) {
++			chatInput.setLength(0);
++		}
++		chatTyping = true;
++		TextInput.setListener(chatInputListener);
++	}
++
++	private void stopChatInput() {
++		if (TextInput.getListener() == chatInputListener) {
++			TextInput.setListener(null);
++		}
++		chatTyping = false;
++	}
++
++	private static boolean isEnterKey(String keyCode) {
++		return "\n".equals(keyCode) || "\r".equals(keyCode) || "ENTER".equalsIgnoreCase(keyCode);
++	}
++
+ 	private String getPlayername(byte sender) {
+ 		// TODO: Player names
+ 		return "player " + sender;
+@@ -843,6 +966,10 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 			Optional<Action> action = getActionForCommand(commandEvent);
+ 			// also set when action was null, to abort drawing.
+ 			fireActionEvent(event, action);
++		} else if (event instanceof GOKeyEvent && isEnterKey(((GOKeyEvent) event).getKeyCode())) {
++			if (chatEnabled && !chatTyping) {
++				startChatInput();
++			}
+ 		} else if (event instanceof GOKeyEvent) {
+ 			Optional<Action> actionForKeyboard = Optional.ofNullable(getActionForKeyboard(((GOKeyEvent) event).getKeyCode()));
+ 			actionForKeyboard.ifPresent(action -> 
+@@ -1243,6 +1370,10 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 
+ 	@Override
+ 	public void fireAction(IAction action) {
++		if (action.getActionType() == EActionType.OPEN_CHAT) {
++			startChatInput();
++			return;
++		}
+ 		IAction fire = controls.replaceAction(action);
+ 		if (fire != null) {
+ 			getInterfaceConnector().fireAction(fire);
+@@ -1260,6 +1391,8 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 	}
+ 
+ 	public void stop() {
++		stopChatInput();
++		TextInput.setStarter(null);
+ 		musicManager.stopMusic();
+ 		backgroundSound.stop();
+ 		controls.stop();
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapInterfaceConnector.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapInterfaceConnector.java
+index 6d5ff9dea..e0d19c862 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapInterfaceConnector.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapInterfaceConnector.java
+@@ -67,6 +67,11 @@ public class MapInterfaceConnector implements ActionFireable, IMapInterfaceConne
+ 	 * @param selection
+ 	 *            The selection.
+ 	 */
++	@Override
++	public void enableChat(byte ownPlayerId, String ownPlayerName) {
++		this.content.enableChat(ownPlayerId, ownPlayerName);
++	}
++
+ 	@Override
+ 	public void setSelection(ISelectionSet selection) {
+ 		this.content.setSelection(selection);
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
+index c33bda95f..21054ae3e 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
+@@ -65,6 +65,7 @@ public class OriginalControls implements IControls {
+ 	private final MinimapMode minimapSettings = new MinimapMode();
+ 	private final MainPanel mainPanel;
+ 	private final Button chatButton;
++	private ActionFireable actionFireable;
+ 
+ 	private ControlPanelLayoutProperties layoutProperties;
+ 	private UIPanel uiBase;
+@@ -321,32 +322,14 @@ public class OriginalControls implements IControls {
+ 	}
+ 
+ 	/**
+-	 * This should one day display the chat.
++	 * Starts typing a chat message (the same as pressing Enter).
+ 	 */
+ 	private final class ShowChatAction extends ExecutableAction {
+-		private final MessageContent messageContent = new MessageContent(
+-				"This is not yet implemented.",
+-				"Cancel",
+-				new ExecutableAction() {
+-					@Override
+-					public void execute() {
+-						mainPanel.setContent(ContentType.BUILD_NORMAL);
+-						chatButton.setActive(false);
+-					}
+-				},
+-				"Ok",
+-				new ExecutableAction() {
+-					@Override
+-					public void execute() {
+-						mainPanel.setContent(ContentType.BUILD_NORMAL);
+-						chatButton.setActive(false);
+-					}
+-				});
+-
+ 		@Override
+ 		public void execute() {
+-			mainPanel.setContent(messageContent);
+-			chatButton.setActive(true); // TODO needs to be unset when content changes.
++			if (actionFireable != null) {
++				actionFireable.fireAction(new Action(EActionType.OPEN_CHAT));
++			}
+ 		}
+ 	}
+ 
+@@ -424,6 +407,7 @@ public class OriginalControls implements IControls {
+ 
+ 	@Override
+ 	public void setDrawContext(ActionFireable actionFireable, MapDrawContext context) {
++		this.actionFireable = actionFireable;
+ 		this.context = context;
+ 		this.minimap = new Minimap(context, minimapSettings);
+ 	}
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index eca38c741..155922671 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -381,6 +381,7 @@ no_soldier_available_CASTLE = Váš hrad nelze obsadit: není k dispozici žádn
+ message_missing_tool = %s nelze obsadit: chybí nástroj (%s).
+ message_no_free_bearer = %s nelze obsadit: není k dispozici žádný volný osadník.
+ message_game_saved = Hra uložena.
++message_chat_only_in_network_games = Chat je dostupný jen v síťové hře. Zprávu napíšeš po stisku Enter.
+ message_no_free_bearer_soldier = %s nemůže zbrojit: není k dispozici žádný volný osadník.
+ action_firerer_slow = Pozor! Hra reaguje pomalu.
+ 
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 424274195..3bfdb7197 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -387,6 +387,7 @@ no_soldier_available_CASTLE = Your castle can't be occupied: no soldier is avail
+ message_missing_tool = %s can't be occupied: tool missing (%s).
+ message_no_free_bearer = %s can't be occupied: no free settler is available.
+ message_game_saved = Game saved.
++message_chat_only_in_network_games = Chat is only available in network games. Press Enter to write a message.
+ message_no_free_bearer_soldier = %s can't arm soldiers: no free settler is available.
+ action_firerer_slow = Warning! The game is responding slowly.
+ 
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+index 3e830ba33..81e4e3ea5 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+@@ -31,6 +31,8 @@ import java.util.stream.Collectors;
+ import jsettlers.algorithms.construction.ConstructionMarksThread;
+ import jsettlers.common.CommonConstants;
+ import jsettlers.common.action.BuildAction;
++import jsettlers.common.action.ChatAction;
++import jsettlers.common.menu.IInGameChat;
+ import jsettlers.common.action.CastSpellAction;
+ import jsettlers.common.action.ChangeTradingRequestAction;
+ import jsettlers.common.action.GroupAction;
+@@ -148,6 +150,15 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 		return groups;
+ 	}
+ 
++	private volatile IInGameChat chat;
++
++	/**
++	 * Sets the chat of a network game, so chat messages written by the user are sent to the other players.
++	 */
++	public void setChat(IInGameChat chat) {
++		this.chat = chat;
++	}
++
+ 	public GuiInterface(IMapInterfaceConnector connector, IGameClock clock, ITaskScheduler taskScheduler, IGuiInputGrid grid, IGameStoppable gameStoppable, byte playerId, boolean multiplayer) {
+ 		this.connector = connector;
+ 		this.clock = clock;
+@@ -324,6 +335,12 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 				}
+ 				break;
+ 
++			case SEND_CHAT_MESSAGE:
++				if (chat != null) {
++					chat.sendMessage(((ChatAction) action).getText());
++				}
++				break;
++
+ 			case SAVE:
+ 				taskScheduler.scheduleTask(new SimpleGuiTask(EGuiAction.QUICK_SAVE, playerId));
+ 				break;
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+index 176e98d06..dd330cf6e 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+@@ -34,7 +34,9 @@ import jsettlers.common.logging.MultiplexingOutputStream;
+ import jsettlers.common.map.IGraphicsGrid;
+ import jsettlers.common.menu.EGameError;
+ import jsettlers.common.menu.EProgressState;
++import jsettlers.common.menu.IInGameChat;
+ import jsettlers.common.menu.IMapInterfaceConnector;
++import jsettlers.common.menu.messages.SimpleMessage;
+ import jsettlers.common.menu.IStartedGame;
+ import jsettlers.common.menu.IStartingGame;
+ import jsettlers.common.menu.IStartingGameListener;
+@@ -84,6 +86,7 @@ public class JSettlersGame {
+ 	private final IGameCreator mapCreator;
+ 	private final INetworkConnector networkConnector;
+ 	private final boolean multiplayer;
++	private IInGameChat chat;
+ 	private final DataInputStream replayFileInputStream;
+ 
+ 	private final GameRunner gameRunner;
+@@ -135,6 +138,13 @@ public class JSettlersGame {
+ 	 * @param mapCreator
+ 	 * @param networkConnector
+ 	 */
++	/**
++	 * Sets the chat between the players of a network game. Must be called before the game is started.
++	 */
++	public void setChat(IInGameChat chat) {
++		this.chat = chat;
++	}
++
+ 	public JSettlersGame(IGameCreator mapCreator, INetworkConnector networkConnector, InitialGameState initialGameState) {
+ 		this(mapCreator, networkConnector, initialGameState, CommonConstants.CONTROL_ALL, true, null);
+ 	}
+@@ -249,6 +259,11 @@ public class JSettlersGame {
+ 				final IMapInterfaceConnector connector = startingGameListener.preLoadFinished(this);
+ 				GuiInterface guiInterface = new GuiInterface(connector, MatchConstants.clock(), networkConnector.getTaskScheduler(),
+ 						mainGrid.getGuiInputGrid(), this, initialGameState.getPlayerId(), multiplayer);
++				if (chat != null) {
++					guiInterface.setChat(chat);
++					connector.enableChat(chat.getOwnPlayerId(), chat.getOwnPlayerName());
++					chat.setReceiver((playerId, playerName, text) -> connector.showMessage(SimpleMessage.chat(playerId, playerName, text)));
++				}
+ 				connector.loadUIState(playerState.getUiState()); // This is required after the GuiInterface instantiation so that
+ 				// ConstructionMarksThread has it's mapArea variable initialized via the EActionType.SCREEN_CHANGE event.
+ 
+@@ -275,6 +290,9 @@ public class JSettlersGame {
+ 
+ 				networkConnector.shutdown();
+ 				mainGrid.stopThreads();
++				if (chat != null) {
++					chat.setReceiver(null);
++				}
+ 				connector.shutdown();
+ 				guiInterface.stop();
+ 				clearState();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+index cd853602c..42646aa3f 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+@@ -25,6 +25,7 @@ import java.util.stream.IntStream;
+ import jsettlers.common.ai.EPlayerType;
+ import jsettlers.common.menu.ENetworkMessage;
+ import jsettlers.common.menu.IChatMessageListener;
++import jsettlers.common.menu.IInGameChat;
+ import jsettlers.common.menu.IJoinPhaseMultiplayerGameConnector;
+ import jsettlers.common.menu.IJoiningGame;
+ import jsettlers.common.menu.IJoiningGameListener;
+@@ -68,6 +69,7 @@ public class MultiplayerGame {
+ 	private IJoiningGameListener joiningGameListener;
+ 	private IMultiplayerListener multiplayerListener;
+ 	private IChatMessageListener chatMessageListener;
++	private volatile InGameChat inGameChat;
+ 	private boolean iAmTheHost = false;
+ 	private int maxPlayers;
+ 
+@@ -122,12 +124,73 @@ public class MultiplayerGame {
+ 
+ 	private IPacketReceiver<ChatMessagePacket> generateChatMessageReceiver() {
+ 		return packet -> {
++			InGameChat gameChat = inGameChat;
++			if (gameChat != null && gameChat.deliver(packet.getAuthorId(), packet.getMessage())) {
++				return; // the game is running: the message is shown in the game
++			}
+ 			if (chatMessageListener != null) {
+ 				chatMessageListener.chatMessageReceived(packet.getAuthorId(), packet.getMessage());
+ 			}
+ 		};
+ 	}
+ 
++	/**
++	 * The chat while the game is running. Remembers the names and positions of the players of the start of the game.
++	 */
++	private final class InGameChat implements IInGameChat {
++		private final byte ownPlayerId;
++		private final String ownPlayerName;
++		private final Map<String, Byte> playerIds = new java.util.HashMap<>();
++		private final Map<String, String> playerNames = new java.util.HashMap<>();
++		private volatile IReceiver receiver;
++
++		InGameChat(byte ownPlayerId) {
++			this.ownPlayerId = ownPlayerId;
++			List<? extends IMultiplayerSlot> allSlots = slotList.getItems();
++			byte[] playerPositions = jsettlers.common.menu.SharedPlayers.playerPositions(allSlots);
++			for (int i = 0; i < allSlots.size(); i++) {
++				IMultiplayerPlayer player = allSlots.get(i).getPlayer();
++				if (player != null) {
++					playerIds.put(player.getId(), playerPositions[i]);
++					playerNames.put(player.getId(), player.getName());
++				}
++			}
++			String name = networkClient.getPlayerInfo().getName();
++			this.ownPlayerName = name != null ? name : playerNames.get(networkClient.getPlayerInfo().getId());
++		}
++
++		@Override
++		public void sendMessage(String text) {
++			networkClient.sendChatMessage(text);
++		}
++
++		@Override
++		public void setReceiver(IReceiver receiver) {
++			this.receiver = receiver;
++		}
++
++		@Override
++		public byte getOwnPlayerId() {
++			return ownPlayerId;
++		}
++
++		@Override
++		public String getOwnPlayerName() {
++			return ownPlayerName;
++		}
++
++		boolean deliver(String authorId, String text) {
++			IReceiver currentReceiver = receiver;
++			if (currentReceiver == null) {
++				return false;
++			}
++			Byte playerId = playerIds.get(authorId);
++			String name = playerNames.get(authorId);
++			currentReceiver.chatMessageReceived(playerId != null ? playerId : -1, name != null ? name : authorId, text);
++			return true;
++		}
++	}
++
+ 	private IPacketReceiver<MatchStartPacket> generateMatchStartedListener() {
+ 		return packet -> {
+ 			updateLists(packet.getMatchInfo());
+@@ -141,6 +204,8 @@ public class MultiplayerGame {
+ 			InitialGameState initialGameState = new InitialGameState(ownPlayerId, playerSettings, randomSeed);
+ 
+ 			JSettlersGame game = new JSettlersGame(mapLoader, networkClient.getNetworkConnector(), initialGameState);
++			inGameChat = new InGameChat(ownPlayerId);
++			game.setChat(inGameChat);
+ 
+ 			multiplayerListener.gameIsStarting(game.start());
+ 		};

@@ -4,6 +4,43 @@ All notable changes of **JSettlers macOS** compared to upstream
 [settlers-remake](https://github.com/paulwedeck/settlers-remake) are listed here, newest version first.
 The version numbers are specific to this macOS build; upstream does not number its versions (it only shows the git commit).
 
+## [0.6.4-alpha] - LAN lobby: colors, load game, chat, shared player
+
+Same upstream base as before ([PR #92](https://github.com/paulwedeck/settlers-remake/pull/92), commit `47d1d4e`). New patches: `23-lobby-colors-and-positions.patch`,
+`24-lan-load-game.patch`, `25-shared-player-experimental.patch`, `26-save-game-improvements.patch`, `27-ingame-chat.patch`,
+`28-lobby-peace-time-and-layout.patch`. Changed patches: `18-smithy-output.patch`, `19-auto-work-area.patch`, `22-settler-messages-and-tool-demand.patch` (fixes, see below).
+
+**Compatibility:** the network protocol of the lobby changed (colors, peace time), so **all players of a LAN game must use 0.6.4-alpha**.
+Saved games of older versions can still be loaded; saved games made with 0.6.4-alpha (file format version 6, they contain the player colors)
+cannot be loaded by older versions.
+
+### Added
+- **Player colors** (patch 23): the player list of the lobby (single player, LAN host and LAN client) has a new last column **Color**. The colors are
+  sent over the network and used in the game. The preview map shows the numbers of the map slots (positions) at the real start points.
+- **Load a saved game in LAN** (patch 24): new tab **Load game** next to **New match**. The host continues a saved game (single player and multiplayer
+  saves are interchangeable). Position, nation and team are fixed by the save, the type (human/computer) can be changed. Every player needs the same
+  save file; a player who does not have it gets a message that says where to copy it, instead of joining. The network clock counts its steps from the
+  saved game time, so a loaded game stays in sync.
+- **Shared player, experimental** (patch 25): in a LAN lobby, human players who choose the same color **and** the same nation play together as one player
+  (shared position, shown with the same position number). It is a separate patch; remove it from `PATCH_NAMES` in the script if it causes trouble.
+- **Better saving** (patch 26): the message "Game saved." (Czech: "Hra uložena.") is shown when a game is saved; the list of games shows the date **and
+  time** of the save; the id of a saved game is the same on all computers of a LAN game (every computer saves when one player saves), so each player
+  can load the save from his own folder; a saved game remembers the colors of the players and restores them (new saves only).
+- **Chat in network games** (patch 27): press **Enter** (or click the chat button of the minimap) to write a message, **Enter** sends it, **Escape**
+  cancels. The message is shown to all players, with the name and in the color of the sender. In single player games a short hint is shown.
+- **Peace time shown to everybody** (patch 28): the peace time chosen by the host is shown to the other players in the lobby (they cannot change it).
+
+### Changed
+- The settings of the new-game window (number of players, start resources, peace time) are centered on the same line as their labels (patch 28).
+- The format of saved games is now version 6 (patch 26, see compatibility above).
+
+### Fixed
+- The buttons of the requested and the offered materials of the laboratory of the Amazons (and of other buildings with four or five material
+  buttons) overlapped; they are evenly spaced now (patch 18).
+- The winegrower often found no work: vines grow only on slopes, so it now searches the whole range that is allowed for a work area (patch 19).
+- Endless "no free settler" messages about a barracks or a building that was destroyed or conquered: requests of buildings that do not exist any more
+  are dropped (patch 22).
+
 ## [0.6.3-alpha] - HD graphics, automatic work area, smithies, messages, growth
 
 Same upstream base as before ([PR #92](https://github.com/paulwedeck/settlers-remake/pull/92), commit `47d1d4e`). New patches: `17-hd-graphics.patch`,

@@ -1,0 +1,390 @@
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index 9b240e8b8..344f557b0 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -485,6 +485,9 @@ game-menu-description = Ukončit nebo uložit hru
+ 
+ multiplayer-joinmatch-title = Připojit se ke hře
+ multiplayer-newmatch-title = Nová hra
++multiplayer-loadmatch-title = Načíst hru
++multiplayer-missing-map-title = Mapa nenalezena
++multiplayer-missing-map-message = Tato hra používá mapu nebo uloženou hru "%s", která není v tomto počítači.\nUložená hra musí být na všech počítačích přesně stejný soubor: zkopírujte soubor hostitele do své složky s uloženými hrami (~/Library/Application Support/JSettlers/save) a hru restartujte.
+ 
+ multiplayer-indicator-match = hra
+ multiplayer-indicator-maps = mapy
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 5587dd15b..9dab50058 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -491,6 +491,9 @@ game-menu-description = Quit or Save the game
+ 
+ multiplayer-joinmatch-title = Join match
+ multiplayer-newmatch-title = New match
++multiplayer-loadmatch-title = Load game
++multiplayer-missing-map-title = Map not found
++multiplayer-missing-map-message = This game uses the map or saved game "%s", which is not on this computer.\nA saved game must be exactly the same file on all computers: copy the file of the host into your folder of saved games (~/Library/Application Support/JSettlers/save) and restart the game.
+ 
+ multiplayer-indicator-match = match
+ multiplayer-indicator-maps = maps
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+index f856bfc11..a3bba0dd8 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/JSettlersGame.java
+@@ -212,6 +212,10 @@ public class JSettlersGame {
+ 
+ 				MainGridWithUiSettings gridWithUiState = mapCreator.loadMainGrid(initialGameState.getPlayerSettings(), initialGameState.getStartResources());
+ 				mainGrid = gridWithUiState.getMainGrid();
++				if (multiplayer) {
++					// a saved game continues at its saved time, but the lockstep numbers of the network game start at 0
++					networkConnector.getGameClock().setLockstepBase(MatchConstants.clock().getTime());
++				}
+ 				PlayerState playerState = gridWithUiState.getPlayerState(initialGameState.getPlayerId());
+ 
+ 				RescheduleTimer.schedule(MatchConstants.clock()); // schedule timer
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index 748d105ff..fa85a2269 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -49,6 +49,7 @@ import javax.swing.border.EmptyBorder;
+ import jsettlers.common.menu.ENetworkMessage;
+ import jsettlers.common.menu.EProgressState;
+ import jsettlers.common.menu.IChatMessageListener;
++import jsettlers.common.ai.EPlayerType;
+ import jsettlers.common.menu.IJoinPhaseMultiplayerGameConnector;
+ import jsettlers.common.menu.IJoiningGame;
+ import jsettlers.common.menu.IJoiningGameListener;
+@@ -65,6 +66,7 @@ import jsettlers.graphics.map.MapDrawContext;
+ import jsettlers.logic.map.loading.MapLoader;
+ import jsettlers.logic.map.loading.data.IMapData;
+ import jsettlers.logic.map.loading.newmap.MapFileHeader;
++import jsettlers.logic.map.loading.savegame.SavegameLoader;
+ import jsettlers.common.position.ShortPoint2D;
+ import jsettlers.logic.player.InitialGameState;
+ import jsettlers.logic.player.PlayerSetting;
+@@ -132,6 +134,11 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	/** Positions of the start points in the preview image (index = position on the map), <code>null</code> as long as they are unknown. */
+ 	private int[][] previewStartPoints;
+ 	private Thread previewStartPointsThread;
++	/**
++	 * If a saved game is shown: the positions (player ids) of the players of the saved game, in the order of the slots of the lobby.
++	 * <code>null</code> for new games.
++	 */
++	private int[] savedGamePositions;
+ 
+ 	public JoinGamePanel(JSettlersFrame settlersFrame) {
+ 		this.settlersFrame = settlersFrame;
+@@ -310,6 +317,9 @@ public class JoinGamePanel extends BackgroundPanel {
+ 						}
+ 					});
+ 
++					if (savedGamePositions != null) {
++						sendSavedGameToServer(connector);
++					}
+ 					onSlotsChanged(connector.getSlots(), connector, myId, true); // init the UI with the players
+ 					numberOfPlayersComboBox.informGame(connector);
+ 				});
+@@ -423,7 +433,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 				joinMultiPlayerMap.abort();
+ 				settlersFrame.showMainMenu();
+ 			});
+-			numberOfPlayersComboBox.setEnabled(iAmTheHost);
++			numberOfPlayersComboBox.setEnabled(iAmTheHost && savedGamePositions == null);
+ 		});
+ 	}
+ 
+@@ -451,9 +461,11 @@ public class JoinGamePanel extends BackgroundPanel {
+ 				.map(MapStartResourcesUIWrapper::new)
+ 				.forEach(startResourcesComboBox::addItem);
+ 		startResourcesComboBox.setSelectedIndex(EMapStartResources.HIGH_GOODS.value - 1);
+-		numberOfPlayersComboBox.reset(mapLoader.getMaxPlayers());
++		savedGamePositions = determineSavedGamePositions(mapLoader);
++		int numberOfSlots = savedGamePositions != null ? savedGamePositions.length : mapLoader.getMaxPlayers();
++		numberOfPlayersComboBox.reset(numberOfSlots);
+ 		buildPlayerSlots();
+-		updateNumberOfPlayerSlots(mapLoader.getMaxPlayers());
++		updateNumberOfPlayerSlots(numberOfSlots);
+ 		loadPreviewStartPoints(mapLoader);
+ 	}
+ 
+@@ -569,7 +581,100 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		mapImage.setIcon(new ImageIcon(image));
+ 	}
+ 
++	/**
++	 * Finds the players of a saved game: the positions on the map that are used. The player that saved the game comes first, then the other human
++	 * players, then the computer players. Players that join a LAN game take the slots in this order.
++	 *
++	 * @return The positions, or <code>null</code> if the map is not a saved game.
++	 */
++	private static int[] determineSavedGamePositions(MapLoader mapLoader) {
++		if (!(mapLoader instanceof SavegameLoader)) {
++			return null;
++		}
++		MapFileHeader header = mapLoader.getFileHeader();
++		PlayerSetting[] settings = header.getPlayerSettings();
++		Byte savingPlayer = header.getPlayerId();
++		List<Integer> positions = new ArrayList<>();
++		for (int i = 0; i < settings.length; i++) {
++			if (settings[i].isAvailable()) {
++				positions.add(i);
++			}
++		}
++		positions.sort(Comparator.comparingInt((Integer position) -> {
++			if (savingPlayer != null && savingPlayer.intValue() == position.intValue()) {
++				return 0;
++			}
++			return settings[position].getPlayerType() == EPlayerType.HUMAN || settings[position].getPlayerType() == null ? 1 : 2;
++		}).thenComparingInt(position -> position));
++		return positions.stream().mapToInt(Integer::intValue).toArray();
++	}
++
++	/**
++	 * @return The slot number (team number) that is shown in the lobby for a team of a saved game. The numbers of the teams in the saved game can be
++	 * bigger than the number of players in the lobby, so the teams are numbered in the order of their first appearance.
++	 */
++	private byte savedGameTeamNumber(PlayerSetting[] settings, int slot) {
++		List<Byte> teams = new ArrayList<>();
++		for (int i = 0; i < savedGamePositions.length; i++) {
++			Byte team = settings[savedGamePositions[i]].getTeamId();
++			byte key = team != null ? team : (byte) savedGamePositions[i];
++			if (!teams.contains(key)) {
++				teams.add(key);
++			}
++		}
++		Byte team = settings[savedGamePositions[slot]].getTeamId();
++		return (byte) teams.indexOf(team != null ? team : (byte) savedGamePositions[slot]);
++	}
++
++	private void buildSavedGamePlayerSlots() {
++		PlayerSetting[] settings = mapLoader.getFileHeader().getPlayerSettings();
++		playerSlots.clear();
++		for (byte i = 0; i < savedGamePositions.length; i++) {
++			PlayerSlot playerSlot = playerSlotFactory.createPlayerSlot(i, this.mapLoader);
++			playerSlots.add(playerSlot);
++
++			int position = savedGamePositions[i];
++			PlayerSetting setting = settings[position];
++			playerSlot.setSlot((byte) position, true);
++			playerSlot.setColor((byte) position, true);
++			playerSlot.setPreviewListener(this::refreshPreview);
++			playerSlot.setTeam(savedGameTeamNumber(settings, i), true);
++			if (setting.getCivilisation() != null) {
++				playerSlot.setCivilisation(setting.getCivilisation(), true);
++			}
++			// the position, the nation and the team of a saved game can't be changed
++			playerSlot.disableSlotInput();
++			playerSlot.disableCivilisationInput();
++			playerSlot.disableTeamInput();
++		}
++	}
++
++	/**
++	 * Hands the players of the saved game over to the server of a LAN game: number of slots, positions, nations, teams, colors and types.
++	 */
++	private void sendSavedGameToServer(IJoinPhaseMultiplayerGameConnector connector) {
++		PlayerSetting[] settings = mapLoader.getFileHeader().getPlayerSettings();
++		connector.setPlayerCount(savedGamePositions.length);
++		for (byte i = 0; i < savedGamePositions.length; i++) {
++			int position = savedGamePositions[i];
++			PlayerSetting setting = settings[position];
++			connector.setPosition(i, (byte) position);
++			if (setting.getCivilisation() != null) {
++				connector.setCivilisation(i, setting.getCivilisation());
++			}
++			connector.setTeam(i, savedGameTeamNumber(settings, i));
++			connector.setColor(i, (byte) position);
++			if (i > 0 && setting.getPlayerType() != null) { // the first slot is the host
++				connector.setType(i, setting.getPlayerType());
++			}
++		}
++	}
++
+ 	private void buildPlayerSlots() {
++		if (savedGamePositions != null) {
++			buildSavedGamePlayerSlots();
++			return;
++		}
+ 		int maximumNumberOfPlayers = this.mapLoader.getMaxPlayers();
+ 		playerSlots.clear();
+ 		for (byte i = 0; i < maximumNumberOfPlayers; i++) {
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+index 2528976f7..7bb2e5706 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+@@ -301,6 +301,10 @@ public class PlayerSlot {
+ 		return (byte) Math.max(colorComboBox.getSelectedIndex(), 0);
+ 	}
+ 
++	public void disableSlotInput() {
++		slotComboBox.setEnabled(false);
++	}
++
+ 	public void disableColorInput() {
+ 		colorComboBox.setEnabled(false);
+ 	}
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/ServerConnectionPanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/ServerConnectionPanel.java
+index 48433c491..3f68c246b 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/ServerConnectionPanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/multiplayer/ServerConnectionPanel.java
+@@ -19,6 +19,7 @@ import java.util.Collections;
+ import java.util.List;
+ import java.util.stream.Collectors;
+ 
++import javax.swing.JOptionPane;
+ import javax.swing.JPanel;
+ import javax.swing.JTabbedPane;
+ import javax.swing.SwingUtilities;
+@@ -41,6 +42,7 @@ public abstract class ServerConnectionPanel extends JPanel {
+ 	protected JTabbedPane root = new JTabbedPane();
+ 	private RemoteMapDirectoryPanel maps = null;
+ 	private OpenPanel newMatch = null;
++	private OpenPanel loadMatch = null;
+ 	private OpenPanel joinMatch = null;
+ 	private JSettlersFrame settlersFrame;
+ 
+@@ -71,15 +73,21 @@ public abstract class ServerConnectionPanel extends JPanel {
+ 
+ 		boolean conMatch = connection.isConnected() && connection instanceof IMultiplayerConnector;
+ 		if(!conMatch && newMatch != null) {
++			root.removeTabAt(i);
+ 			root.removeTabAt(i);
+ 			root.removeTabAt(i);
+ 			newMatch = null;
++			loadMatch = null;
+ 			joinMatch = null;
+ 		} else if(conMatch && newMatch == null){
+ 			newMatch = new OpenPanel(MapList.getDefaultList().getFreshMaps().getItems(), this::openNewMatch);
+ 			SwingUtilities.updateComponentTreeUI(newMatch);
+ 			root.insertTab(Labels.getString("multiplayer-newmatch-title"), null, newMatch, null, i);
+ 
++			loadMatch = new OpenPanel(MapList.getDefaultList().getSavedMaps(), this::openNewMatch);
++			SwingUtilities.updateComponentTreeUI(loadMatch);
++			root.insertTab(Labels.getString("multiplayer-loadmatch-title"), null, loadMatch, null, i + 1);
++
+ 			joinMatch = new OpenPanel(Collections.emptyList(), this::joinMatch);
+ 			SwingUtilities.updateComponentTreeUI(joinMatch);
+ 
+@@ -91,7 +99,7 @@ public abstract class ServerConnectionPanel extends JPanel {
+ 						SwingUtilities.invokeLater(() -> joinMatch.setMapLoaders(mapLoaders));
+ 					});
+ 
+-			root.insertTab(Labels.getString("multiplayer-joinmatch-title"), null, joinMatch, null, i+1);
++			root.insertTab(Labels.getString("multiplayer-joinmatch-title"), null, joinMatch, null, i + 2);
+ 		}
+ 
+ 		updateAfter(connection, i);
+@@ -110,6 +118,13 @@ public abstract class ServerConnectionPanel extends JPanel {
+ 
+ 	private void joinMatch(MapLoader loader) {
+ 		NetworkGameMapLoader networkGameMapLoader = (NetworkGameMapLoader) loader;
++		if (MapList.getDefaultList().getMapById(networkGameMapLoader.getMapId()) == null) {
++			// the map or the saved game of the host is not available on this computer
++			JOptionPane.showMessageDialog(this,
++					Labels.getString("multiplayer-missing-map-message", networkGameMapLoader.getMapName()),
++					Labels.getString("multiplayer-missing-map-title"), JOptionPane.WARNING_MESSAGE);
++			return;
++		}
+ 		IJoiningGame joiningGame = ((IMultiplayerConnector)getConnection()).joinMultiplayerGame(networkGameMapLoader.getJoinableGame());
+ 		joiningGame.setListener(new IJoiningGameListener() {
+ 			@Override
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/IGameClock.java b/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/IGameClock.java
+index b7f581636..625629023 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/IGameClock.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/IGameClock.java
+@@ -33,6 +33,13 @@ public interface IGameClock extends IPausingSupplier {
+ 
+ 	void setTime(int newTime);
+ 
++	/**
++	 * Tells the clock that the lockstep numbers of the network game start counting at the given game time (needed if a saved game is continued
++	 * in a network game: the clock does not start at 0, but the server starts counting the lockstep at 0). Not needed if the game starts at time 0.
++	 */
++	default void setLockstepBase(int gameTime) {
++	}
++
+ 	void setTaskExecutor(ITaskExecutor taskExecutor);
+ 
+ 	void multiplyGameSpeed(float factor);
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/time/ISynchronizableClock.java b/jsettlers.network/src/main/java/jsettlers/network/client/time/ISynchronizableClock.java
+index 953cfd91e..d6dbeb432 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/time/ISynchronizableClock.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/time/ISynchronizableClock.java
+@@ -27,6 +27,13 @@ public interface ISynchronizableClock {
+ 	 */
+ 	int getTime();
+ 
++	/**
++	 * @return The time that is exchanged with the other clients and the server: the time since the first lockstep of the network game.
++	 */
++	default int getSyncTime() {
++		return getTime();
++	}
++
+ 	/**
+ 	 * Pauses the clock for at least the given period of time.
+ 	 * 
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSyncSenderTimerTask.java b/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSyncSenderTimerTask.java
+index c4791bd31..aa907b88e 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSyncSenderTimerTask.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSyncSenderTimerTask.java
+@@ -37,7 +37,7 @@ public class TimeSyncSenderTimerTask extends TimerTask {
+ 
+ 	@Override
+ 	public void run() {
+-		int localTime = clock.getTime();
++		int localTime = clock.getSyncTime();
+ 		int expectedTimeAtServer = localTime + channel.getRoundTripTime().getRtt() / 2;
+ 
+ 		channel.sendPacketAsync(NetworkConstants.ENetworkKey.TIME_SYNC, new TimeSyncPacket(expectedTimeAtServer));
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSynchronizationListener.java b/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSynchronizationListener.java
+index 2ec50c613..2a5a31136 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSynchronizationListener.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/time/TimeSynchronizationListener.java
+@@ -43,7 +43,7 @@ public class TimeSynchronizationListener extends PacketChannelListener<TimeSyncP
+ 	@Override
+ 	protected void receivePacket(ENetworkKey key, TimeSyncPacket packet) throws IOException {
+ 		int expectedRemoteTime = packet.getTime() + rttSupplier.getRoundTripTime().getRtt() / 2;
+-		int localTime = clock.getTime();
++		int localTime = clock.getSyncTime();
+ 
+ 		int deltaTime = localTime - expectedRemoteTime;
+ 
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java b/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
+index 2df6ae869..acc15333a 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
+@@ -52,6 +52,8 @@ public final class NetworkTimer extends TimerTask implements INetworkClientClock
+ 	private final LinkedList<SyncTasksPacket> tasks = new LinkedList<>();
+ 
+ 	private int time = 0;
++	/** Game time at which the lockstep numbers of the network game start counting (0 unless a saved game was loaded into a network game). */
++	private int lockstepBase = 0;
+ 	private int maxAllowedLockstep = -1;
+ 
+ 	private boolean isPausing;
+@@ -120,7 +122,7 @@ public final class NetworkTimer extends TimerTask implements INetworkClientClock
+ 	private synchronized void executeRun() {
+ 		try {
+ 			time += TIME_SLICE;
+-			final int lockstep = time / NetworkConstants.Client.LOCKSTEP_PERIOD;
++			final int lockstep = (time - lockstepBase) / NetworkConstants.Client.LOCKSTEP_PERIOD;
+ 
+ 			// check if the lockstep is allowed
+ 			synchronized (lockstepLock) {
+@@ -336,6 +338,16 @@ public final class NetworkTimer extends TimerTask implements INetworkClientClock
+ 		return time;
+ 	}
+ 
++	@Override
++	public void setLockstepBase(int gameTime) {
++		this.lockstepBase = gameTime;
++	}
++
++	@Override
++	public int getSyncTime() {
++		return time - lockstepBase;
++	}
++
+ 	@Override
+ 	public void setReplayLogStream(DataOutputStream replayFileStream) {
+ 		if (this.replayLogStream != null) {

@@ -1,0 +1,481 @@
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java b/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java
+index 063e0efe9..d5e22b4f2 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/IJoinPhaseMultiplayerGameConnector.java
+@@ -69,6 +69,19 @@ public interface IJoinPhaseMultiplayerGameConnector {
+ 	default void setColor(byte slot, byte color) {
+ 	}
+ 
++	/**
++	 * Tells the other players which peace time (in minutes) the host has selected. Only the host may do this.
++	 */
++	default void setPeaceTime(int minutes) {
++	}
++
++	/**
++	 * @return The peace time (in minutes) the host has selected, as far as it is known.
++	 */
++	default int getPeaceTime() {
++		return 0;
++	}
++
+ 	void setPlayerCount(int playerCount);
+ 
+ 	/**
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+index 42646aa3f..2cf534cf8 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+@@ -72,6 +72,7 @@ public class MultiplayerGame {
+ 	private volatile InGameChat inGameChat;
+ 	private boolean iAmTheHost = false;
+ 	private int maxPlayers;
++	private volatile int peaceTime = 0;
+ 
+ 	public MultiplayerGame(AsyncNetworkClientConnector networkClientFactory) {
+ 		this.networkClientFactory = networkClientFactory;
+@@ -302,6 +303,7 @@ public class MultiplayerGame {
+ 
+ 	void updateLists(MatchInfoPacket matchInfo) {
+ 		maxPlayers = matchInfo.getMaxPlayers();
++		peaceTime = matchInfo.getPeaceTime();
+ 		List<IMultiplayerPlayer> players = new LinkedList<>();
+ 		for (PlayerInfoPacket playerInfoPacket : matchInfo.getPlayers()) {
+ 			players.add(new MultiplayerPlayer(playerInfoPacket));
+@@ -404,6 +406,16 @@ public class MultiplayerGame {
+ 				networkClient.setPlayerCount(playerCount);
+ 			}
+ 
++			@Override
++			public void setPeaceTime(int minutes) {
++				networkClient.setPeaceTime((byte) minutes);
++			}
++
++			@Override
++			public int getPeaceTime() {
++				return peaceTime;
++			}
++
+ 			@Override
+ 			public void setMultiplayerListener(IMultiplayerListener multiplayerListener) {
+ 				MultiplayerGame.this.multiplayerListener = multiplayerListener;
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index 78a923ada..80cd4c549 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -26,6 +26,7 @@ import java.awt.FlowLayout;
+ import java.awt.GridBagConstraints;
+ import java.awt.GridBagLayout;
+ import java.awt.GridLayout;
++import java.awt.Insets;
+ import java.awt.event.ActionListener;
+ import java.util.ArrayList;
+ import java.util.Arrays;
+@@ -37,6 +38,7 @@ import javax.swing.BorderFactory;
+ import javax.swing.ImageIcon;
+ import javax.swing.JButton;
+ import javax.swing.JComboBox;
++import javax.swing.JComponent;
+ import javax.swing.JLabel;
+ import javax.swing.JPanel;
+ import javax.swing.JScrollPane;
+@@ -140,6 +142,8 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	 * <code>null</code> for new games.
+ 	 */
+ 	private int[] savedGamePositions;
++	/** The game that is told about the peace time the host selects, <code>null</code> for everybody but the host of a network game. */
++	private IJoinPhaseMultiplayerGameConnector peaceTimeConnector;
+ 
+ 	public JoinGamePanel(JSettlersFrame settlersFrame) {
+ 		this.settlersFrame = settlersFrame;
+@@ -156,12 +160,8 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		westPanel.add(settingsPanelWrapper, BorderLayout.CENTER);
+ 		settingsPanelWrapper.add(settingsPanel);
+ 		//settingsPanel.setLayout(new GridLayout(0, 2, 20, 0));
+-		JPanel settingsLabelPanel = new JPanel();
+-		settingsLabelPanel.setLayout(new GridLayout(3, 0, 0, 20));
+-		JPanel settingsComboBoxPanel = new JPanel();
+-		settingsComboBoxPanel.setLayout(new GridLayout(3, 0, 0, 20));
+-		settingsPanel.add(settingsLabelPanel);
+-		settingsPanel.add(settingsComboBoxPanel);
++		// one row per setting: label and combo box share the row, so that their centers are on the same height
++		settingsPanel.setLayout(new GridBagLayout());
+ 		mapPanel.setLayout(new BorderLayout());
+ 		JPanel mapNameLabelWrapper = new JPanel();
+ 		mapPanel.add(mapNameLabelWrapper, BorderLayout.NORTH);
+@@ -169,12 +169,10 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		mapNameLabel.setHorizontalAlignment(SwingConstants.CENTER);
+ 		mapPanel.add(mapImage, BorderLayout.CENTER);
+ 		mapImage.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+-		settingsLabelPanel.add(numberOfPlayersLabel);
+-		settingsComboBoxPanel.add(numberOfPlayersComboBox);
+-		settingsLabelPanel.add(startResourcesLabel);
+-		settingsComboBoxPanel.add(startResourcesComboBox);
+-		settingsLabelPanel.add(peaceTimeLabel);
+-		settingsComboBoxPanel.add(peaceTimeComboBox);
++		addSettingsRow(0, numberOfPlayersLabel, numberOfPlayersComboBox);
++		addSettingsRow(1, startResourcesLabel, startResourcesComboBox);
++		addSettingsRow(2, peaceTimeLabel, peaceTimeComboBox);
++		peaceTimeComboBox.addActionListener(e -> informAboutPeaceTime());
+ 		sendChatMessageButton.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 15));
+ 		JPanel chatPanel = new JPanel();
+ 		chatPanel.setLayout(new BorderLayout(0, 10));
+@@ -203,6 +201,25 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		add(content);
+ 	}
+ 
++	private void addSettingsRow(int row, JComponent label, JComponent comboBox) {
++		int gap = row > 0 ? 20 : 0;
++		GridBagConstraints labelConstraints = new GridBagConstraints();
++		labelConstraints.gridx = 0;
++		labelConstraints.gridy = row;
++		labelConstraints.anchor = GridBagConstraints.CENTER;
++		labelConstraints.fill = GridBagConstraints.HORIZONTAL;
++		labelConstraints.insets = new Insets(gap, 0, 0, 20);
++		settingsPanel.add(label, labelConstraints);
++
++		GridBagConstraints comboBoxConstraints = new GridBagConstraints();
++		comboBoxConstraints.gridx = 1;
++		comboBoxConstraints.gridy = row;
++		comboBoxConstraints.anchor = GridBagConstraints.CENTER;
++		comboBoxConstraints.fill = GridBagConstraints.HORIZONTAL;
++		comboBoxConstraints.insets = new Insets(gap, 0, 0, 0);
++		settingsPanel.add(comboBox, comboBoxConstraints);
++	}
++
+ 	private void setStyle() {
+ 		mapNameLabel.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_LONG);
+ 		numberOfPlayersLabel.putClientProperty(ELFStyle.KEY, ELFStyle.LABEL_SHORT);
+@@ -243,6 +260,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	}
+ 
+ 	public void setSinglePlayerMap(MapLoader mapLoader) {
++		peaceTimeConnector = null;
+ 		this.playerSlotFactory = new SinglePlayerSlotFactory();
+ 		titleLabel.setText(Labels.getString("join-game-panel-new-single-player-game-title"));
+ 		peaceTimeComboBox.setEnabled(true);
+@@ -280,6 +298,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	}
+ 
+ 	public void setNewMultiPlayerMap(MapLoader mapLoader, IMultiplayerConnector connector) {
++		peaceTimeConnector = null;
+ 		this.playerSlotFactory = new HostOfMultiplayerPlayerSlotFactory(connector);
+ 		titleLabel.setText(Labels.getString("join-game-panel-new-multi-player-game-title"));
+ 		peaceTimeComboBox.setEnabled(true);
+@@ -300,6 +319,8 @@ public class JoinGamePanel extends BackgroundPanel {
+ 			public void gameJoined(IJoinPhaseMultiplayerGameConnector connector) {
+ 				SwingUtilities.invokeLater(() -> {
+ 					initializeChatFor(connector);
++					peaceTimeConnector = connector;
++					informAboutPeaceTime(); // the guests see the peace time from the start
+ 					setStartButtonActionListener(e -> {
+ 						applySelectedPeaceTime();
+ 						waitForPreviewStartPoints();
+@@ -336,6 +357,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 	}
+ 
+ 	public void setJoinMultiPlayerMap(IJoinPhaseMultiplayerGameConnector joinMultiPlayerMap, MapLoader mapLoader, String playerUUID) {
++		peaceTimeConnector = null;
+ 		playerSlotFactory = new ClientOfMultiplayerPlayerSlotFactory();
+ 		titleLabel.setText(Labels.getString("join-game-panel-join-multi-player-game-title"));
+ 		peaceTimeComboBox.setEnabled(false);
+@@ -430,6 +452,9 @@ public class JoinGamePanel extends BackgroundPanel {
+ 					playerSlot.setReady(true);
+ 				}
+ 			}
++			if (!iAmTheHost) {
++				showPeaceTimeOfHost(joinMultiPlayerMap.getPeaceTime());
++			}
+ 			showSharedPlayers(changingSlots.getItems());
+ 			setCancelButtonActionListener(e -> {
+ 				joinMultiPlayerMap.abort();
+@@ -459,6 +484,27 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		JSettlersGame.setNextGamePeaceTimeMinutes(selected == null ? 0 : selected.minutes);
+ 	}
+ 
++	/**
++	 * Tells the other players of the network game about the peace time the host has selected.
++	 */
++	private void informAboutPeaceTime() {
++		IJoinPhaseMultiplayerGameConnector connector = peaceTimeConnector;
++		EPeaceTime selected = (EPeaceTime) peaceTimeComboBox.getSelectedItem();
++		if (connector != null && selected != null) {
++			connector.setPeaceTime(selected.minutes);
++		}
++	}
++
++	/**
++	 * Shows the peace time the host has selected (only the host can change it).
++	 */
++	private void showPeaceTimeOfHost(int minutes) {
++		EPeaceTime peaceTime = EPeaceTime.ofMinutes(minutes);
++		if (peaceTimeComboBox.getSelectedItem() != peaceTime) {
++			peaceTimeComboBox.setSelectedItem(peaceTime);
++		}
++	}
++
+ 	private void prepareUiFor(MapLoader mapLoader) {
+ 		this.mapLoader = mapLoader;
+ 		mapNameLabel.setText(mapLoader.getMapName());
+@@ -819,6 +865,15 @@ public class JoinGamePanel extends BackgroundPanel {
+ 			this.minutes = minutes;
+ 		}
+ 
++		static EPeaceTime ofMinutes(int minutes) {
++			for (EPeaceTime peaceTime : values()) {
++				if (peaceTime.minutes == minutes) {
++					return peaceTime;
++				}
++			}
++			return WITHOUT;
++		}
++
+ 		@Override
+ 		public String toString() {
+ 			return Labels.getString("peace-time-" + name());
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java b/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java
+index 665ccca77..540101471 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java
+@@ -116,6 +116,7 @@ public final class NetworkConstants {
+ 		TYPE_CHANGED,
+ 		PLAYER_COUNT_CHANGED,
+ 		COLOR_CHANGED,
++		PEACE_TIME_CHANGED,
+ 		;
+ 
+ 		private static final ENetworkMessage[] values = ENetworkMessage.values();
+@@ -173,6 +174,7 @@ public final class NetworkConstants {
+ 		CHANGE_POSITION,
+ 		CHANGE_PLAYER_COUNT,
+ 		CHANGE_COLOR,
++		CHANGE_PEACE_TIME,
+ 		;
+ 
+ 		private static final ENetworkKey[] values = ENetworkKey.values();
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java b/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java
+index d64c1dd16..8300110cb 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/NetworkClient.java
+@@ -175,6 +175,12 @@ public class NetworkClient implements ITaskScheduler, INetworkConnector, INetwor
+ 		channel.sendPacketAsync(ENetworkKey.CHANGE_COLOR, new ByteTuplePacket(slot, color));
+ 	}
+ 
++	@Override
++	public void setPeaceTime(byte peaceTimeMinutes) throws IllegalStateException {
++		EPlayerState.assertState(state, EPlayerState.IN_MATCH);
++		channel.sendPacketAsync(ENetworkKey.CHANGE_PEACE_TIME, new ByteTuplePacket(peaceTimeMinutes, (byte) 0));
++	}
++
+ 	@Override
+ 	public void setType(byte slot, byte playerType) throws IllegalStateException {
+ 		EPlayerState.assertState(state, EPlayerState.IN_MATCH);
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java b/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java
+index c19be0321..f0dfde316 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/client/interfaces/INetworkClient.java
+@@ -98,6 +98,11 @@ public interface INetworkClient {
+ 
+ 	void setColor(byte slot, byte color) throws IllegalStateException;
+ 
++	/**
++	 * Tells the other players of the match which peace time (in minutes) the host has selected. Only the host may do this.
++	 */
++	void setPeaceTime(byte peaceTimeMinutes) throws IllegalStateException;
++
+ 	void setType(byte slot, byte playerType) throws IllegalStateException;
+ 
+ 	void setPosition(byte slot, byte position) throws IllegalStateException;
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/common/packets/MatchInfoPacket.java b/jsettlers.network/src/main/java/jsettlers/network/common/packets/MatchInfoPacket.java
+index 544026bfb..6098f5987 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/common/packets/MatchInfoPacket.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/common/packets/MatchInfoPacket.java
+@@ -35,6 +35,8 @@ public class MatchInfoPacket extends Packet {
+ 	private MapInfoPacket mapInfo;
+ 	private PlayerInfoPacket[] players;
+ 	private SlotInfoPacket[] slots;
++	/** The peace time (in minutes) that is selected by the host. */
++	private byte peaceTime;
+ 
+ 	public MatchInfoPacket() {
+ 	}
+@@ -56,6 +58,7 @@ public class MatchInfoPacket extends Packet {
+ 		mapInfo = match.getMap();
+ 		players = match.getPlayerInfos();
+ 		slots = match.getSlotInfos();
++		peaceTime = match.getPeaceTime();
+ 	}
+ 
+ 	@Override
+@@ -76,6 +79,7 @@ public class MatchInfoPacket extends Packet {
+ 		for(SlotInfoPacket curr : slots) {
+ 			curr.serialize(dos);
+ 		}
++		dos.writeByte(peaceTime);
+ 	}
+ 
+ 	@Override
+@@ -104,6 +108,11 @@ public class MatchInfoPacket extends Packet {
+ 		}
+ 
+ 		this.slots = slots;
++		peaceTime = dis.readByte();
++	}
++
++	public byte getPeaceTime() {
++		return peaceTime;
+ 	}
+ 
+ 	public String getId() {
+@@ -135,7 +144,7 @@ public class MatchInfoPacket extends Packet {
+ 		if (this == o) return true;
+ 		if (o == null || getClass() != o.getClass()) return false;
+ 		MatchInfoPacket that = (MatchInfoPacket) o;
+-		return maxPlayers == that.maxPlayers && Objects.equals(id, that.id) && Objects.equals(matchName, that.matchName) && Objects.equals(mapInfo, that.mapInfo) && Arrays.equals(players, that.players) && Arrays.equals(slots, that.slots);
++		return maxPlayers == that.maxPlayers && peaceTime == that.peaceTime && Objects.equals(id, that.id) && Objects.equals(matchName, that.matchName) && Objects.equals(mapInfo, that.mapInfo) && Arrays.equals(players, that.players) && Arrays.equals(slots, that.slots);
+ 	}
+ 
+ 	@Override
+@@ -149,6 +158,6 @@ public class MatchInfoPacket extends Packet {
+ 	@Override
+ 	public String toString() {
+ 		return "MatchInfoPacket [id=" + id + ", matchName=" + matchName + ", maxPlayers=" + maxPlayers + ", mapInfo=" + mapInfo + ", players="
+-				+ Arrays.toString(players) + ", slots=" + Arrays.toString(slots) + "]";
++				+ Arrays.toString(players) + ", slots=" + Arrays.toString(slots) + ", peaceTime=" + peaceTime + "]";
+ 	}
+ }
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java b/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java
+index ab66480a1..1bcf449ff 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/IServerManager.java
+@@ -69,6 +69,8 @@ public interface IServerManager {
+ 
+ 	void setColorForSlot(Player player, byte slot, byte color);
+ 
++	void setPeaceTime(Player player, byte peaceTimeMinutes);
++
+ 	void setPlayerCount(Player player, int playerCount);
+ 
+ 	void sendMatchesToPlayer(Player player);
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java b/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java
+index 33cdd607b..43ee1f16a 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/ServerManager.java
+@@ -29,6 +29,7 @@ import jsettlers.network.server.listeners.ChangePlayerCountPacketListener;
+ import jsettlers.network.server.listeners.ChangePlayerTypePacketListener;
+ import jsettlers.network.server.listeners.ChangePositionPacketListener;
+ import jsettlers.network.server.listeners.ChangeColorPacketListener;
++import jsettlers.network.server.listeners.ChangePeaceTimePacketListener;
+ import jsettlers.network.server.listeners.ChangeTeamPacketListener;
+ import jsettlers.network.server.listeners.ChatMessageForwardingListener;
+ import jsettlers.network.server.listeners.IdentifyUserListener;
+@@ -98,6 +99,7 @@ public class ServerManager implements IServerManager {
+ 			channel.registerListener(new ChangePositionPacketListener(this, player));
+ 			channel.registerListener(new ChangeTeamPacketListener(this, player));
+ 			channel.registerListener(new ChangeColorPacketListener(this, player));
++			channel.registerListener(new ChangePeaceTimePacketListener(this, player));
+ 			channel.registerListener(new ChangePlayerCountPacketListener(this, player));
+ 
+ 			return true;
+@@ -266,6 +268,18 @@ public class ServerManager implements IServerManager {
+ 		}
+ 	}
+ 
++	@Override
++	public void setPeaceTime(Player player, byte peaceTimeMinutes) {
++		try {
++			Match match = verifyAndGetMatch(player);
++
++			match.setPeaceTime(peaceTimeMinutes);
++		} catch (IllegalStateException e) {
++			player.sendPacket(NetworkConstants.ENetworkKey.REJECT_PACKET,
++					new RejectPacket(NetworkConstants.ENetworkMessage.INVALID_STATE_ERROR, NetworkConstants.ENetworkKey.CHANGE_PEACE_TIME));
++		}
++	}
++
+ 	@Override
+ 	public void setPlayerCount(Player player, int playerCount) {
+ 		try {
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/listeners/ChangePeaceTimePacketListener.java b/jsettlers.network/src/main/java/jsettlers/network/server/listeners/ChangePeaceTimePacketListener.java
+new file mode 100644
+index 000000000..edef5004e
+--- /dev/null
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/listeners/ChangePeaceTimePacketListener.java
+@@ -0,0 +1,30 @@
++package jsettlers.network.server.listeners;
++
++import java.io.IOException;
++import jsettlers.network.NetworkConstants;
++import jsettlers.network.common.packets.ByteTuplePacket;
++import jsettlers.network.infrastructure.channel.GenericDeserializer;
++import jsettlers.network.infrastructure.channel.listeners.PacketChannelListener;
++import jsettlers.network.server.IServerManager;
++import jsettlers.network.server.match.Player;
++
++/**
++ * Receives the peace time (in minutes) the host has selected. The second value of the packet is not used.
++ */
++public class ChangePeaceTimePacketListener extends PacketChannelListener<ByteTuplePacket> {
++
++	private final IServerManager serverManager;
++	private final Player player;
++
++	public ChangePeaceTimePacketListener(IServerManager serverManager, Player player) {
++		super(NetworkConstants.ENetworkKey.CHANGE_PEACE_TIME, new GenericDeserializer<>(ByteTuplePacket.class));
++
++		this.serverManager = serverManager;
++		this.player = player;
++	}
++
++	@Override
++	protected void receivePacket(NetworkConstants.ENetworkKey key, ByteTuplePacket packet) throws IOException {
++		serverManager.setPeaceTime(player, packet.getValueA());
++	}
++}
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java b/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java
+index b0acf7f0e..49f2058f1 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/server/match/Match.java
+@@ -59,6 +59,7 @@ public class Match {
+ 	private TaskCollectingListener taskCollectingListener;
+ 	private TaskSendingTimerTask taskSendingTimerTask;
+ 	private int currPlayers;
++	private volatile byte peaceTime = 0;
+ 
+ 	public Match(String name, int maxPlayers, MapInfoPacket map, Player host, long randomSeed) {
+ 		this.maxPlayers = maxPlayers;
+@@ -380,6 +381,17 @@ public class Match {
+ 		}
+ 	}
+ 
++	public byte getPeaceTime() {
++		return peaceTime;
++	}
++
++	public void setPeaceTime(byte peaceTime) {
++		if(this.peaceTime == peaceTime) return;
++
++		this.peaceTime = peaceTime;
++		sendMatchInfoUpdate(ENetworkMessage.PEACE_TIME_CHANGED, null);
++	}
++
+ 	public void setPlayerCount(int playerCount) {
+ 		synchronized (players) {
+ 			if(playerCount < players.size()) {
+diff --git a/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java b/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
+index acc15333a..e5165031d 100644
+--- a/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
++++ b/jsettlers.network/src/main/java/jsettlers/network/synchronic/timer/NetworkTimer.java
+@@ -345,6 +345,12 @@ public final class NetworkTimer extends TimerTask implements INetworkClientClock
+ 
+ 	@Override
+ 	public int getSyncTime() {
++		if (!scheduled) {
++			// While a game is loading, the clock is already set to the time of the saved game, but the lockstep base is not known yet. Reporting such
++			// a time would make the server believe that this client is far ahead and it would stop waiting for it, so that the commands of the
++			// players are executed with a huge delay (or never).
++			return 0;
++		}
+ 		return time - lockstepBase;
+ 	}
+ 

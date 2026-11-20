@@ -1,0 +1,279 @@
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/SharedPlayers.java b/jsettlers.common/src/main/java/jsettlers/common/menu/SharedPlayers.java
+new file mode 100644
+index 000000000..460036c81
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/menu/SharedPlayers.java
+@@ -0,0 +1,53 @@
++package jsettlers.common.menu;
++
++import java.util.List;
++
++/**
++ * Human players of a network game that choose the same color and the same nation play together as one player (experimental). They share the
++ * position on the map of the one of them that has the lowest position.
++ */
++public final class SharedPlayers {
++
++	private SharedPlayers() {
++	}
++
++	/**
++	 * Determines the position of the player each slot belongs to.
++	 *
++	 * @param slots
++	 * 		The slots of the lobby.
++	 * @return For every slot (same order as the list) the position that is used in the game: the position of the slot itself, or - if other human
++	 * players have the same color and nation - the lowest position of this group.
++	 */
++	public static byte[] playerPositions(List<? extends IMultiplayerSlot> slots) {
++		byte[] positions = new byte[slots.size()];
++		for (int i = 0; i < positions.length; i++) {
++			IMultiplayerSlot slot = slots.get(i);
++			positions[i] = slot.getPosition();
++			if (slot.getPlayer() == null) {
++				continue; // only human players are merged
++			}
++			for (int j = 0; j < positions.length; j++) {
++				IMultiplayerSlot other = slots.get(j);
++				if (j != i && other.getPlayer() != null && other.getColor() == slot.getColor() && other.getCivilisation() == slot.getCivilisation()
++						&& other.getPosition() < positions[i]) {
++					positions[i] = other.getPosition();
++				}
++			}
++		}
++		return positions;
++	}
++
++	/**
++	 * @return true if the slot with the given index plays together with at least one other slot.
++	 */
++	public static boolean isShared(List<? extends IMultiplayerSlot> slots, int index) {
++		byte[] positions = playerPositions(slots);
++		for (int i = 0; i < positions.length; i++) {
++			if (i != index && positions[i] == positions[index]) {
++				return true;
++			}
++		}
++		return false;
++	}
++}
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index 344f557b0..f56f45d41 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -566,6 +566,7 @@ join-game-panel-player-type = Typ
+ join-game-panel-map-slot = Pozice
+ join-game-panel-team = Tým
+ join-game-panel-color = Barva
++join-game-panel-shared-player-tooltip = Stejná barva a národ: tito hráči hrají společně jako jeden hráč (experimentální).
+ join-game-panel-send-chat-message = Odeslat
+ 
+ stats-panel-exit = Další
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 9dab50058..84004a547 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -572,6 +572,7 @@ join-game-panel-player-type = Type
+ join-game-panel-map-slot = Position
+ join-game-panel-team = Team
+ join-game-panel-color = Color
++join-game-panel-shared-player-tooltip = Same color and nation: these players play together as one player (experimental).
+ join-game-panel-send-chat-message = Send
+ 
+ stats-panel-exit = Next
+diff --git a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+index 57672463b..cd853602c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
++++ b/jsettlers.logic/src/main/java/jsettlers/main/MultiplayerGame.java
+@@ -146,14 +146,42 @@ public class MultiplayerGame {
+ 		};
+ 	}
+ 
++	/**
++	 * Human players with the same color and nation play together as one player: only the slot at the lowest position of such a group is a player
++	 * of the game, the others only control it.
++	 */
++	private boolean isMergedIntoOtherSlot(List<? extends IMultiplayerSlot> slots, byte[] playerPositions, IMultiplayerSlot slot) {
++		return playerPositions[slots.indexOf(slot)] != slot.getPosition();
++	}
++
++	private String sharedPlayerName(List<? extends IMultiplayerSlot> slots, byte[] playerPositions, IMultiplayerSlot representative) {
++		StringBuilder name = new StringBuilder();
++		for (int i = 0; i < slots.size(); i++) {
++			IMultiplayerSlot other = slots.get(i);
++			if (other == representative || (playerPositions[i] == representative.getPosition() && other.getPlayer() != null)) {
++				String playerName = playerNameOf(other);
++				if (playerName != null) {
++					if (name.length() > 0) {
++						name.append(" + ");
++					}
++					name.append(playerName);
++				}
++			}
++		}
++		return name.length() > 0 ? name.toString() : null;
++	}
++
+ 	private PlayerSetting[] determinePlayerSettings() {
+-		Map<Byte, PlayerSetting> playerSettings = slotList.getItems().stream().sorted(Comparator.comparingInt(IMultiplayerSlot::getPosition))
++		List<? extends IMultiplayerSlot> allSlots = slotList.getItems();
++		byte[] playerPositions = jsettlers.common.menu.SharedPlayers.playerPositions(allSlots);
++		Map<Byte, PlayerSetting> playerSettings = allSlots.stream().sorted(Comparator.comparingInt(IMultiplayerSlot::getPosition))
++				.filter(slot -> !isMergedIntoOtherSlot(allSlots, playerPositions, slot))
+ 				.map(slot -> {
+ 					PlayerSetting playerSetting;
+ 					if(iAmTheHost) {
+-						playerSetting = new PlayerSetting(slot.getType(), slot.getCivilisation(), slot.getTeam()).withDisplayName(playerNameOf(slot));
++						playerSetting = new PlayerSetting(slot.getType(), slot.getCivilisation(), slot.getTeam()).withDisplayName(sharedPlayerName(allSlots, playerPositions, slot));
+ 					} else {
+-						playerSetting = new PlayerSetting(EPlayerType.HUMAN, slot.getCivilisation(), slot.getTeam()).withDisplayType(slot.getType()).withDisplayName(playerNameOf(slot));
++						playerSetting = new PlayerSetting(EPlayerType.HUMAN, slot.getCivilisation(), slot.getTeam()).withDisplayType(slot.getType()).withDisplayName(sharedPlayerName(allSlots, playerPositions, slot));
+ 					}
+ 
+ 					return Map.entry(slot.getPosition(), playerSetting);
+@@ -166,8 +194,10 @@ public class MultiplayerGame {
+ 		for (int i = 0; i < colors.length; i++) {
+ 			colors[i] = (byte) i;
+ 		}
+-		for (IMultiplayerSlot slot : slotList.getItems()) {
+-			if (slot.getPosition() >= 0 && slot.getPosition() < colors.length) {
++		List<? extends IMultiplayerSlot> allSlots = slotList.getItems();
++		byte[] playerPositions = jsettlers.common.menu.SharedPlayers.playerPositions(allSlots);
++		for (IMultiplayerSlot slot : allSlots) {
++			if (playerPositions[allSlots.indexOf(slot)] == slot.getPosition() && slot.getPosition() >= 0 && slot.getPosition() < colors.length) {
+ 				colors[slot.getPosition()] = slot.getColor();
+ 			}
+ 		}
+@@ -180,9 +210,12 @@ public class MultiplayerGame {
+ 
+ 	private byte calculateOwnPlayerId() {
+ 		String myId = networkClient.getPlayerInfo().getId();
+-		for (IMultiplayerSlot currSlot : slotList.getItems()) {
++		List<? extends IMultiplayerSlot> allSlots = slotList.getItems();
++		byte[] playerPositions = jsettlers.common.menu.SharedPlayers.playerPositions(allSlots);
++		for (int i = 0; i < allSlots.size(); i++) {
++			IMultiplayerSlot currSlot = allSlots.get(i);
+ 			if(currSlot.getPlayer() != null && currSlot.getPlayer().getId().equals(myId)) {
+-				return currSlot.getPosition();
++				return playerPositions[i]; // players that play together as one player share the position
+ 			}
+ 		}
+ 		throw new RuntimeException("Wasn't able to find my id!");
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index fa85a2269..8fd1274e7 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -58,6 +58,7 @@ import jsettlers.common.menu.IMultiplayerListener;
+ import jsettlers.common.menu.IMultiplayerPlayer;
+ import jsettlers.common.menu.IMultiplayerSlot;
+ import jsettlers.common.menu.IStartingGame;
++import jsettlers.common.menu.SharedPlayers;
+ import jsettlers.common.player.PlayerColors;
+ import jsettlers.common.utils.collections.ChangingList;
+ import jsettlers.graphics.localization.Labels;
+@@ -429,6 +430,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 					playerSlot.setReady(true);
+ 				}
+ 			}
++			showSharedPlayers(changingSlots.getItems());
+ 			setCancelButtonActionListener(e -> {
+ 				joinMultiPlayerMap.abort();
+ 				settlersFrame.showMainMenu();
+@@ -437,6 +439,18 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		});
+ 	}
+ 
++	/**
++	 * Human players with the same color and nation play together as one player, so they are shown at the same position.
++	 */
++	private void showSharedPlayers(List<? extends IMultiplayerSlot> slots) {
++		byte[] positions = SharedPlayers.playerPositions(slots);
++		for (int i = 0; i < slots.size() && i < playerSlots.size(); i++) {
++			boolean shared = SharedPlayers.isShared(slots, i);
++			playerSlots.get(i).showSharedPosition(positions[i], shared && positions[i] != slots.get(i).getPosition());
++		}
++		refreshPreview();
++	}
++
+ 	/**
+ 	 * Hands the selected peace time over to the game that is started next.
+ 	 */
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+index 7bb2e5706..7b06eb7c6 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/slots/PlayerSlot.java
+@@ -70,6 +70,10 @@ public class PlayerSlot {
+ 	private byte slot;
+ 	private byte color;
+ 	private Runnable previewListener;
++	/** true while a slot is shown that is not the real position (players that play together as one player). */
++	private boolean adjustingDisplayedSlot = false;
++	/** false if the position of this slot cannot be changed by the user at all (client of a game, saved game). */
++	private boolean slotInputAllowed = true;
+ 
+ 	public PlayerSlot(byte index) {
+ 		this.index = index;
+@@ -156,6 +160,9 @@ public class PlayerSlot {
+ 		typeComboBox.addActionListener(e -> updateAiPlayerName());
+ 		civilisationComboBox.addActionListener(e -> updateAiPlayerName());
+ 		slotComboBox.addActionListener(e -> {
++			if (adjustingDisplayedSlot) {
++				return;
++			}
+ 			// this is done server side in multiplayer
+ 			if (slotListener != null && gameToBeInformedAboutChanges == null) {
+ 				slotListener.slotHasChanged(oldSlotValue, getSlot());
+@@ -184,6 +191,9 @@ public class PlayerSlot {
+ 			}
+ 		});
+ 		slotComboBox.addActionListener(e -> {
++			if (adjustingDisplayedSlot) {
++				return;
++			}
+ 			byte newSlot = getSlot();
+ 			if(informGameAboutChanges && newSlot != slot) {
+ 				gameToBeInformedAboutChanges.setPosition(index, newSlot);
+@@ -302,9 +312,34 @@ public class PlayerSlot {
+ 	}
+ 
+ 	public void disableSlotInput() {
++		slotInputAllowed = false;
+ 		slotComboBox.setEnabled(false);
+ 	}
+ 
++	/**
++	 * Shows the position of the player this slot plays together with (see {@link jsettlers.common.menu.SharedPlayers}) instead of its own position,
++	 * the position cannot be changed as long as the slot is shown like that. This only changes the display, nothing is sent to the server.
++	 *
++	 * @param position
++	 * 		The position that is shown.
++	 * @param shared
++	 * 		true if the slot plays together with another slot.
++	 */
++	public void showSharedPosition(byte position, boolean shared) {
++		if (shared) {
++			adjustingDisplayedSlot = true;
++			try {
++				if (slotComboBox.getSelectedIndex() != position) {
++					slotComboBox.setSelectedIndex(position);
++				}
++			} finally {
++				adjustingDisplayedSlot = false;
++			}
++		}
++		slotComboBox.setEnabled(slotInputAllowed && !shared);
++		slotComboBox.setToolTipText(shared ? Labels.getString("join-game-panel-shared-player-tooltip") : null);
++	}
++
+ 	public void disableColorInput() {
+ 		colorComboBox.setEnabled(false);
+ 	}
+@@ -351,7 +386,7 @@ public class PlayerSlot {
+ 	}
+ 
+ 	public void disableAllInputs() {
+-		slotComboBox.setEnabled(false);
++		disableSlotInput();
+ 		disableCivilisationInput();
+ 		disableTeamInput();
+ 		disableColorInput();
