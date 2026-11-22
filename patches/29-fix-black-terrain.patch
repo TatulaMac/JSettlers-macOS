@@ -1,0 +1,75 @@
+diff --git a/go.graphics.swing/src/main/java/go/graphics/swing/opengl/LWJGLDrawContext.java b/go.graphics.swing/src/main/java/go/graphics/swing/opengl/LWJGLDrawContext.java
+index e688281dc..669191c8b 100644
+--- a/go.graphics.swing/src/main/java/go/graphics/swing/opengl/LWJGLDrawContext.java
++++ b/go.graphics.swing/src/main/java/go/graphics/swing/opengl/LWJGLDrawContext.java
+@@ -453,13 +453,23 @@ public class LWJGLDrawContext extends GLDrawContext {
+ 			fillBackgroundFormat(handle);
+ 		}
+ 
+-		int draw_lines = handle.regionCount;
++		int draw_lines = 0;
++
++		int[] firsts = new int[handle.regionCount];
++		int[] counts = new int[handle.regionCount];
++		for (int i = 0; i != handle.regionCount; i++) {
++			// a single region with a negative count makes OpenGL reject the whole call (nothing is drawn), so such regions are skipped
++			if (handle.regions[i*2] < 0 || handle.regions[i*2+1] <= 0) continue;
++			firsts[draw_lines] = handle.regions[i*2];
++			counts[draw_lines] = handle.regions[i*2+1];
++			draw_lines++;
++		}
++
++		if (draw_lines == 0) return;
+ 
+-		int[] firsts = new int[draw_lines];
+-		int[] counts = new int[draw_lines];
+-		for (int i = 0; i != draw_lines; i++) {
+-			firsts[i] = handle.regions[i*2];
+-			counts[i] = handle.regions[i*2+1];
++		if (draw_lines != firsts.length) {
++			firsts = java.util.Arrays.copyOf(firsts, draw_lines);
++			counts = java.util.Arrays.copyOf(counts, draw_lines);
+ 		}
+ 
+ 		glMultiDrawArrays(GL_TRIANGLES, firsts, counts);
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/Background.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/Background.java
+index 463762dac..7507c309b 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/Background.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/Background.java
+@@ -1226,21 +1226,29 @@ public class Background implements IGraphicsBackgroundListener {
+ 
+ 		backgroundHandle.texture = getTextureData(gl);
+ 
+-		backgroundHandle.regionCount = screenArea.getLines();
+-		backgroundHandle.regions = new int[backgroundHandle.regionCount*2];
+-		for(int i = 0; i < backgroundHandle.regionCount; i++) {
++		// One draw region (first vertex, vertex count) per visible map line. Lines that are completely outside of the map are left out: a region
++		// with a negative or a too long vertex count (it happens when the map is zoomed out so far that its border is visible) makes OpenGL
++		// reject the whole draw call (GL_INVALID_VALUE), and then no terrain is drawn at all (black background, only the objects are visible).
++		int[] newRegions = new int[screenArea.getLines() * 2];
++		int newRegionCount = 0;
++		for(int i = 0; i < screenArea.getLines(); i++) {
++			int y = screenArea.getLineY(i);
++			if(y < 0 || y >= bufferHeight) continue;
++
+ 			int startX = screenArea.getLineStartX(i);
+ 			if(startX < 0) startX = 0;
+ 
+ 			int endX = screenArea.getLineEndX(i);
+ 			if(endX >= bufferWidth) endX = bufferWidth;
+ 
+-			int y = screenArea.getLineY(i);
+-			if(y < 0 || y > bufferHeight) continue;
++			if(endX <= startX) continue;
+ 
+-			backgroundHandle.regions[i*2] = (bufferWidth * y + startX) * 2 * 3;
+-			backgroundHandle.regions[i*2+1] = (endX-startX)* 2 * 3;
++			newRegions[newRegionCount*2] = (bufferWidth * y + startX) * 2 * 3;
++			newRegions[newRegionCount*2+1] = (endX-startX)* 2 * 3;
++			newRegionCount++;
+ 		}
++		backgroundHandle.regions = newRegions;
++		backgroundHandle.regionCount = newRegionCount;
+ 		gl.drawBackground(backgroundHandle);
+ 	}
+ 

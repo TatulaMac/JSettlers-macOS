@@ -1,0 +1,206 @@
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+index 536c4ed79..b03c6e613 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+@@ -37,6 +37,13 @@ public enum EActionType {
+ 	 */
+ 	SHOW_CONSTRUCTION_MARK,
+ 
++	/**
++	 * Selects the nearest building of a type and centers the map on it (right click on a building button in the build menu).
++	 *
++	 * @see FindBuildingAction
++	 */
++	FIND_BUILDING,
++
+ 	/**
+ 	 * Destroys the selected items.
+ 	 */
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/FindBuildingAction.java b/jsettlers.common/src/main/java/jsettlers/common/action/FindBuildingAction.java
+new file mode 100644
+index 000000000..85bcf2d66
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/FindBuildingAction.java
+@@ -0,0 +1,44 @@
++/*
++ * Copyright (c) 2018
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++package jsettlers.common.action;
++
++import jsettlers.common.buildings.EBuildingType;
++import jsettlers.common.position.ShortPoint2D;
++
++/**
++ * Asks the logic to select the nearest own building of the given type and to center the map on it. The reference position (normally the center of
++ * the visible map area) is added by the map content before the action is sent to the logic.
++ */
++public class FindBuildingAction extends Action {
++	private final EBuildingType buildingType;
++	private final ShortPoint2D referencePosition;
++
++	public FindBuildingAction(EBuildingType buildingType, ShortPoint2D referencePosition) {
++		super(EActionType.FIND_BUILDING);
++		this.buildingType = buildingType;
++		this.referencePosition = referencePosition;
++	}
++
++	public EBuildingType getBuildingType() {
++		return buildingType;
++	}
++
++	/**
++	 * @return The position the nearest building is searched from, or <code>null</code> if unknown.
++	 */
++	public ShortPoint2D getReferencePosition() {
++		return referencePosition;
++	}
++}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index 409485cb4..d8f5ab56a 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -51,6 +51,7 @@ import jsettlers.common.CommonConstants;
+ import jsettlers.common.action.Action;
+ import jsettlers.common.action.ChatAction;
+ import jsettlers.common.action.EActionType;
++import jsettlers.common.action.FindBuildingAction;
+ import jsettlers.common.action.GroupAction;
+ import jsettlers.common.action.IAction;
+ import jsettlers.common.action.PointAction;
+@@ -1374,6 +1375,12 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 			startChatInput();
+ 			return;
+ 		}
++		if (action.getActionType() == EActionType.FIND_BUILDING) {
++			// add the center of the visible map area as reference position
++			FloatRectangle screen = context.getScreen().getPosition();
++			ShortPoint2D center = context.getPositionUnder(screen.getCenterX(), screen.getCenterY());
++			action = new FindBuildingAction(((FindBuildingAction) action).getBuildingType(), center);
++		}
+ 		IAction fire = controls.replaceAction(action);
+ 		if (fire != null) {
+ 			getInterfaceConnector().fireAction(fire);
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
+index 21054ae3e..07e7153bd 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
+@@ -23,6 +23,9 @@ import go.graphics.event.GOModalEventHandler;
+ import go.graphics.event.mouse.GODrawEvent;
+ import jsettlers.common.map.shapes.MapRectangle;
+ import jsettlers.common.action.EActionType;
++import jsettlers.common.action.FindBuildingAction;
++import jsettlers.common.action.ShowConstructionMarksAction;
++import jsettlers.common.buildings.EBuildingType;
+ import jsettlers.common.action.EMoveToType;
+ import jsettlers.common.action.IAction;
+ import jsettlers.common.menu.IStartedGame;
+@@ -211,7 +214,15 @@ public class OriginalControls implements IControls {
+ 
+ 	@Override
+ 	public Optional<Action> getActionForMoveTo(UIPoint position, EMoveToType moveToType) {
+-		return getActionFor(position, (relativex, relativey) -> getMoveToForMinimap(relativex, relativey, moveToType));
++		Optional<Action> action = getActionFor(position, (relativex, relativey) -> getMoveToForMinimap(relativex, relativey, moveToType));
++		if (action.isPresent() && action.get().getActionType() == EActionType.SHOW_CONSTRUCTION_MARK) {
++			// right click on a building button of the build menu: find the nearest building of that type instead of placing a new one
++			EBuildingType buildingType = ((ShowConstructionMarksAction) action.get()).getBuildingType();
++			if (buildingType != null) {
++				return Optional.of(new FindBuildingAction(buildingType, null));
++			}
++		}
++		return action;
+ 	}
+ 	
+ 	@Override
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+index 33a5bbf8c..79720821b 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+@@ -38,6 +38,7 @@ import jsettlers.common.action.ChangeTradingRequestAction;
+ import jsettlers.common.action.GroupAction;
+ import jsettlers.common.action.ConvertAction;
+ import jsettlers.common.action.EActionType;
++import jsettlers.common.action.FindBuildingAction;
+ import jsettlers.common.action.EMoveToType;
+ import jsettlers.common.action.IAction;
+ import jsettlers.common.action.MoveToAction;
+@@ -204,6 +205,10 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 				constructionMarksCalculator.setBuilding(buildingVariant);
+ 				break;
+ 
++			case FIND_BUILDING:
++				findBuilding((FindBuildingAction) action);
++				break;
++
+ 			case DEBUG_ACTION:
+ 				for (final ISelectable curr : currentSelection) {
+ 					if (curr instanceof IDebugable) {
+@@ -496,6 +501,58 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 		}
+ 	}
+ 
++	/** Building type and buildings (sorted by distance) of the last right click on a build menu button. Only used for the user interface. */
++	private EBuildingType findBuildingType = null;
++	private List<Building> findBuildingList = new ArrayList<>();
++	private int findBuildingIndex = 0;
++
++	/**
++	 * Selects the nearest own building of the requested type and centers the map on it. Clicking again (while that building is still selected) goes
++	 * on with the next building of that type, so every building can be found. This only changes the user interface, so no lockstep task is needed.
++	 */
++	private void findBuilding(FindBuildingAction action) {
++		final EBuildingType type = action.getBuildingType();
++		if (type == null) {
++			return;
++		}
++
++		final Object selected = currentSelection.getSingle();
++		final boolean continueCycle = type == findBuildingType && findBuildingIndex < findBuildingList.size()
++				&& selected != null && selected == findBuildingList.get(findBuildingIndex);
++
++		if (continueCycle) {
++			// drop buildings that were destroyed in the meantime
++			final Building current = findBuildingList.get(findBuildingIndex);
++			findBuildingList.removeIf(b -> b != current && !Building.getAllBuildings().contains(b));
++			findBuildingIndex = (findBuildingList.indexOf(current) + 1) % findBuildingList.size();
++		} else {
++			final ShortPoint2D reference = action.getReferencePosition();
++			final List<Building> found = new ArrayList<>();
++			for (final Building building : Building.getAllBuildings()) {
++				if (building.getBuildingVariant().isVariantOf(type) && building.getPlayer().getPlayerId() == playerId) {
++					found.add(building);
++				}
++			}
++			if (reference != null) {
++				found.sort(Comparator.comparingLong(b -> {
++					final long dx = b.getPosition().x - reference.x;
++					final long dy = b.getPosition().y - reference.y;
++					return dx * dx + dy * dy;
++				}));
++			}
++			findBuildingType = type;
++			findBuildingList = found;
++			findBuildingIndex = 0;
++		}
++
++		if (findBuildingList.isEmpty()) {
++			return;
++		}
++		final Building target = findBuildingList.get(findBuildingIndex);
++		setSelection(new SelectionSet(target));
++		connector.scrollTo(target.getPosition(), true);
++	}
++
+ 	private void selectNextOfType() {
+ 		if (currentSelection.getSize() != 1) {
+ 			return;

@@ -1,0 +1,12 @@
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index 80cd4c549..05f5dc0f3 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -801,6 +801,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		addPlayerSlotHeadline();
+ 		for (int i = 0; i < playerSlots.size(); i++) {
+ 			if (i < (int) amount) {
++				playerSlots.get(i).setAvailable(true);
+ 				playerSlots.get(i).addTo(playerSlotsPanel, i + 1);
+ 			} else {
+ 				playerSlots.get(i).setAvailable(false);

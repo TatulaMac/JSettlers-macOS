@@ -1,0 +1,80 @@
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java
+index 840421a41..8bec122e9 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java
+@@ -5,6 +5,7 @@ import java.util.BitSet;
+ import jsettlers.algorithms.path.Path;
+ import jsettlers.algorithms.simplebehaviortree.Node;
+ import jsettlers.algorithms.simplebehaviortree.Root;
++import jsettlers.common.action.EMoveToType;
+ import jsettlers.common.material.EMaterialType;
+ import jsettlers.common.material.ESearchType;
+ import jsettlers.common.movable.EMovableAction;
+@@ -12,6 +13,7 @@ import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.movable.IGraphicsThief;
+ import jsettlers.common.player.IPlayer;
+ import jsettlers.common.position.ShortPoint2D;
++import jsettlers.logic.constants.MatchConstants;
+ import jsettlers.logic.movable.MovableManager;
+ import jsettlers.logic.movable.other.AttackableHumanMovable;
+ import jsettlers.logic.movable.Movable;
+@@ -39,6 +41,13 @@ public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThi
+ 	 */
+ 	private ShortPoint2D homePos = null;
+ 
++	/**
++	 * A steal order that was given during the peace time. The thief walks there, but steals nothing before the peace time is over. When it is
++	 * over, the thief carries out the order at once (like the soldiers that look for enemies when the peace time ends).
++	 */
++	private ShortPoint2D stealAfterPeace = null;
++	private EMoveToType stealAfterPeaceMoveType = null;
++
+ 	public ThiefMovable(AbstractMovableGrid grid, ShortPoint2D position, Player player, Movable movable) {
+ 		super(grid, EMovableType.THIEF, position, player, movable);
+ 	}
+@@ -50,19 +59,36 @@ public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThi
+ 	public static Node<ThiefMovable> createThiefBehaviour() {
+ 		return guardSelector(
+ 				handleFrozenEffect(),
++				// the peace time is over: carry out the steal order that was given during the peace time
++				guard(mov -> mov.nextTarget == null && mov.stealAfterPeace != null && !MatchConstants.isPeaceTime(),
++					action(mov -> {
++						mov.nextTarget = mov.stealAfterPeace;
++						mov.nextMoveToType = mov.stealAfterPeaceMoveType;
++						mov.stealAfterPeace = null;
++						mov.stealAfterPeaceMoveType = null;
++					})
++				),
+ 				guard(mov -> mov.nextTarget != null,
+ 					action(mov -> {
+ 						mov.goToTarget = null;
+ 						mov.currentTarget = null;
+ 						mov.returnPos = null;
++						mov.stealAfterPeace = null;
++						mov.stealAfterPeaceMoveType = null;
+ 
+ 						// remember where to bring the stolen material to (an order given on enemy ground must not make this position the destination)
+ 						if (mov.homePos == null || mov.isOnOwnGround()) {
+ 							mov.homePos = mov.position;
+ 						}
+ 
++						// nobody steals during the peace time: just go there and steal when the peace time is over
++						if (MatchConstants.isPeaceTime() && mov.nextMoveToType.isWorkOnDestination()) {
++							mov.stealAfterPeace = mov.nextTarget;
++							mov.stealAfterPeaceMoveType = mov.nextMoveToType;
++						}
++
+ 						// steal something
+-						if(mov.nextMoveToType.isWorkOnDestination() && mov.getMaterial() == EMaterialType.NO_MATERIAL) {
++						else if(mov.nextMoveToType.isWorkOnDestination() && mov.getMaterial() == EMaterialType.NO_MATERIAL) {
+ 							Path dijkstraPath = mov.grid.searchDijkstra(mov, mov.nextTarget.x, mov.nextTarget.y, (short) 30, ESearchType.FOREIGN_MATERIAL);
+ 							if (dijkstraPath != null) {
+ 								mov.currentTarget = dijkstraPath.getTargetPosition();
+@@ -130,6 +156,7 @@ public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThi
+ 
+ 	protected static Node<ThiefMovable> stealMaterial() {
+ 		return sequence(
++				condition(mov -> !MatchConstants.isPeaceTime()),
+ 				condition(mov -> mov.grid.fitsSearchType(mov, mov.currentTarget.x, mov.currentTarget.y, ESearchType.FOREIGN_MATERIAL)),
+ 
+ 				playAction(EMovableAction.ACTION1, (short)(ACTION1_DURATION*1000)),

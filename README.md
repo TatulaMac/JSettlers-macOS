@@ -6,7 +6,7 @@
 > This project is not affiliated with, endorsed by or supported by Ubisoft, Blue Byte or the upstream JSettlers project.
 > The game data (graphics and sound) of *The Settlers III* is **not included** - you need your own copy (see below).
 
-Current version: **0.6.4-alpha** (alpha: expect bugs; saved games may become invalid in future versions).
+Current version: **0.6.5-alpha** (alpha: expect bugs; saved games may become invalid in future versions).
 See the [changelog](CHANGELOG.md) for everything that differs from upstream.
 
 ## What you need
@@ -17,7 +17,7 @@ See the [changelog](CHANGELOG.md) for everything that differs from upstream.
   Tested with the GOG version 1.60 data.
 
 ## Installation
-1. Download `JSettlers-macOS-v0.6.4-alpha-arm64.dmg` from the [Releases](../../releases) page.
+1. Download `JSettlers-macOS-v0.6.5-alpha-arm64.dmg` from the [Releases](../../releases) page.
 2. Open the DMG and drag **JSettlers** to the **Applications** folder.
 3. Start JSettlers. macOS may say the app is damaged or from an unidentified developer. It is not signed by Apple (it is signed ad hoc),
    so you have to allow it once. Do **one** of these:
@@ -65,7 +65,8 @@ better colours, otherwise a built-in enlarger is used.
   back with one key without selecting them one by one. A unit belongs to one group only (the last one it was stored in). Units that died are dropped from the group. A group is kept until you overwrite it
   (Control + number with nothing selected empties it); groups are not saved with the game. Buildings cannot be stored.
 - **Peace time:** when creating a game (single player, or as the host of a multiplayer game) you can choose a peace time of 10 to 60 minutes. Nobody
-  attacks until it is over; the countdown is shown at the top right, left of the zoom. It is not saved with the game.
+  attacks until it is over; the countdown is shown at the top right, left of the zoom. It is not saved with the game. Thieves can be made during the
+  peace time, but they steal nothing until it is over (then they carry out their order at once).
 - **Automatic work area:** lumberjacks, stonecutters, fishers, waterworks, foresters, rice farms and beekeepers move their work area to the nearest
   work when nothing is left to do, so you do not have to click it again and again; farms and winegrowers return to their default area or move a bit
   to the side of an obstacle. You can still set the work area by hand. Farmers, winegrowers, rice farmers and beekeepers harvest ripe crops of
@@ -76,11 +77,21 @@ better colours, otherwise a built-in enlarger is used.
 - Thieves and geologists can be turned back into carriers (like pioneers) with a button in the selection panel; the converted units stay selected.
 - The tool smithy and the weapon smithy show the finished products lying at the building. The tool smithy also produces shovels and hammers up to the
   numbers of diggers and bricklayers set in the settlers settings.
+- **Diggers and bricklayers of a construction site:** the panel of a building under construction shows a spade (diggers) and a hammer (bricklayers)
+  with `limit/total` (e.g. `4/6`: the site may use 4 of the 6 diggers you have) and arrows to change the limit. The number below in brackets, e.g. `(3)`,
+  is how many workers really work on the site. If you change nothing, the workers are distributed automatically as before. In the settlers settings
+  an **absolute** number of diggers or bricklayers makes free settlers become diggers or bricklayers until it is reached (the tool smithy makes the
+  tools); with percentages the safety limit stays.
+- **Settlers still to come:** residential buildings show *Remaining: n* (how many settlers will still leave the house), the barracks show
+  *Free settlers: n* (how many can become soldiers).
+- **Find a building:** a **two-finger click** (right click) on a building button in the build menu selects the nearest building of that type and
+  centers the map on it; click again to go to the next one.
+- **Q** saves the game and then leaves it (a second press leaves at once). Use the **Quit** button of the game menu to leave without saving.
 - A plain two-finger click on a spot is the normal move command. A thief ordered next to a pile of enemy goods steals it and carries it home.
 - The **zoom** is shown at the top right, left of the frame rate (100% = original size, one image pixel per screen pixel).
 - Click on a message at the bottom of the screen to jump to the place it is about.
 - LAN game: the host opens the LAN tab, clicks "Start local server" and creates a game; the others see it in the list.
-  All players must use the same version (0.6.4-alpha changed the network protocol, so it cannot play with older versions).
+  All players must use the same version (0.6.5-alpha added game commands, so it cannot play with older versions).
 - **Player colors:** in the lobby (single player and LAN) every player has a **Color** selection in the last column of the player list; the colors
   are sent to the other players and used in the game. The preview map shows the numbers of the start positions.
 - **Load a saved game in LAN:** the host opens the LAN tab, chooses **Load game** next to **New match** and selects a saved game. Position, nation and team
@@ -89,8 +100,8 @@ better colours, otherwise a built-in enlarger is used.
   Single player and multiplayer saves can be loaded in both. The list of games shows the date **and time** of a save; a save remembers the player colors.
 - **Chat in network games:** press **Enter** (or click the chat button of the minimap) to write a message, **Enter** sends it, **Escape** cancels.
   The message appears for all players with the name and in the color of the sender.
-- **Shared player (experimental, LAN only):** players who choose the same color **and** the same nation play together as one player and share the
-  position. Remove patch 25 from the script if this causes trouble.
+- **Shared player (LAN only):** players who choose the same color **and** the same nation play together as one player and share the
+  position.
 - The upstream [manual](https://github.com/jsettlers/settlers-remake/wiki/JSettlers-Manual) describes the controls.
 
 ## Reporting bugs
@@ -103,13 +114,14 @@ This build is [PR #92](https://github.com/paulwedeck/settlers-remake/pull/92) (A
 useful messages, correct game speed, better soldier behavior, fixes for the "Gifts of the gods" spell, end-of-game statistics,
 the Amazon and Asian storage/market buildings, a language selection (English, Czech), thief fixes, a zoom indicator, control groups
 (Control + number), a selectable peace time, optional HD graphics, an automatic work area, faster growth of crops, more messages
-about missing tools and settlers, and a much better LAN lobby (player colors, loading saved games, in-game chat, a shared player, the peace time
-shown to all players).
+about missing tools and settlers, a much better LAN lobby (player colors, loading saved games, in-game chat, a shared player, the peace time
+shown to all players), construction workers per site, settlers still to come, finding a building from the build menu, saving before the Q key leaves the game and
+a fix for the black terrain.
 
 ## Other platforms
 Only the macOS build (Apple Silicon) is built and tested here. The patches change the shared game code and the desktop (Swing) user interface, so the
 source code should also build for Windows and Linux with the normal upstream instructions, but this is untested. The Android app has its own menus:
-the new lobby features (colors, loading a saved game, chat) do not appear there, and a 0.6.4-alpha network game is not compatible with other versions.
+the new lobby features (colors, loading a saved game, chat) do not appear there, and a 0.6.5-alpha network game is not compatible with other versions.
 
 ## Building it yourself
 You need a Mac with Apple Silicon, git, Xcode command line tools and JDK 17 (`brew install --cask temurin@17`).

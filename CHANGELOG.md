@@ -4,6 +4,51 @@ All notable changes of **JSettlers macOS** compared to upstream
 [settlers-remake](https://github.com/paulwedeck/settlers-remake) are listed here, newest version first.
 The version numbers are specific to this macOS build; upstream does not number its versions (it only shows the git commit).
 
+## [0.6.5-alpha] - Construction workers, settlers info, black terrain fix
+
+Same upstream base as before ([PR #92](https://github.com/paulwedeck/settlers-remake/pull/92), commit `47d1d4e`). New patches: `29-fix-black-terrain.patch`,
+`30-construction-workers.patch`, `31-settlers-info-in-buildings.patch`, `32-peace-time-thieves.patch`, `33-find-building-from-menu.patch`,
+`34-lobby-slots-available.patch`, `35-quit-key-saves-game.patch`, `36-workers-real-count.patch`. Changed patch: `25-shared-player-experimental.patch`
+is now called `25-shared-player.patch` (the word "experimental" was removed from the patch, the tooltip and the documentation).
+
+**Compatibility:** new game commands were added (the numbers of diggers and bricklayers of a construction site), so **all players of a LAN game must use
+0.6.5-alpha**. Saved games of older versions can still be loaded; saved games made with 0.6.5-alpha should not be loaded by older versions.
+
+### Added
+- **Diggers and bricklayers of a construction site** (patches 30 and 36): the panel of a building under construction shows, between the picture of the
+  building and the required materials, a spade (diggers) and a hammer (bricklayers) with **limit/total** (e.g. `4/6`: this site may use 4 of the 6
+  diggers of the settlement) and arrows to change the limit. Below it, the number of workers that really work on the site is shown in brackets,
+  e.g. `(3)`. The limit can never be higher than the number of workers that exist; the diggers are locked at 0 when the ground is flat (or the
+  flattening is finished). If the limit is lowered, surplus workers leave the site and are used by other sites; when a site is finished, its workers are
+  distributed to the other sites as before. Without any click nothing changes: the number of workers is chosen automatically as in the older versions.
+  The spade is only shown for buildings that need the ground to be flattened.
+- **Absolute numbers in the settlers settings** (patch 30): when the number of diggers or bricklayers is set to an **absolute** value, free settlers
+  become diggers or bricklayers until that number is reached, even if no building asks for them at the moment, and the tool smithy makes the missing tools.
+  The arrows change an absolute number by 1 (percentages still by 5 %). Switching from percent to an absolute number keeps the real number of workers
+  (20 stay 20) instead of a number calculated from the percentage. With percentages the safety limit stays as before.
+- **Settlers still to come** (patch 31): all residential buildings (small, medium, big; all nations) show the carrier icon and **Remaining: n**
+  (Czech: *Zbývá: n*) under the picture of the building: how many settlers will still come out of the house. The line counts down to 0 and disappears.
+  The **barracks** show **Free settlers: n** (Czech: *Volní osadníci: n*): how many settlers can still become soldiers (carriers reserved by the
+  minimum carrier setting are not counted).
+- **Find a building from the build menu** (patch 33): a right click (two-finger click) on a building button in the build menu selects the nearest building
+  of that type (nearest to the middle of the screen) and centers the map on it. Another right click goes on to the next building of that type, so every
+  one can be found. Nothing happens if you have no such building. This only changes your own view; it does not affect other players.
+
+### Changed
+- The key **Q** saves the game before it is left (patch 35). Before, a Q pressed by accident left the game at once and the game was lost. A second press of Q
+  while it is saving leaves at once. The **Quit** button of the game menu still leaves without saving.
+- Players who choose the same color and the same nation in a LAN lobby play together as one player (since 0.6.4-alpha); this is no longer marked as
+  experimental.
+
+### Fixed
+- **Black terrain** (patch 29): sometimes the terrain was not drawn at all (black background, only buildings and units visible), mostly when the map is zoomed
+  far out. The terrain is drawn line by line and a line outside of the map got a negative length, so OpenGL rejected the drawing of the whole terrain.
+  Such lines are skipped now.
+- **Thieves during the peace time** (patch 32): a thief can be made during the peace time, but it steals nothing (it only walks to the place it was sent to).
+  When the peace time is over, it carries out its order at once, as the soldiers do (also for computer players).
+- **Lobby preview** (patch 34): after the number of players in the lobby was lowered and raised again, the new slots stayed marked as unavailable, so a
+  player was missing in the preview map (no circle with the number) and the start settings could be wrong. They are available again now.
+
 ## [0.6.4-alpha] - LAN lobby: colors, load game, chat, shared player
 
 Same upstream base as before ([PR #92](https://github.com/paulwedeck/settlers-remake/pull/92), commit `47d1d4e`). New patches: `23-lobby-colors-and-positions.patch`,

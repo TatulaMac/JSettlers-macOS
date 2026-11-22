@@ -10,8 +10,8 @@
 #
 # What the script needs: a Mac with Apple Silicon, git, JDK 17 (brew install --cask temurin@17) and an internet
 # connection (Gradle downloads the dependencies). The results are placed in:
-#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.4-alpha-arm64.dmg       (the app, this is what users download)
-#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.4-alpha-source.zip      (complete, already patched source code)
+#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.5-alpha-arm64.dmg       (the app, this is what users download)
+#     ~/JSettlers-build/dist/JSettlers-macOS-v0.6.5-alpha-source.zip      (complete, already patched source code)
 #
 # How it works: it downloads the upstream source code (https://github.com/paulwedeck/settlers-remake, the state of
 # pull request #92 "Apple Silicon support", commit 47d1d4e), applies the patches embedded below (the same patches
@@ -19,7 +19,7 @@
 #
 set -euo pipefail
 
-RELEASE_VERSION="0.6.4-alpha"   # shown in the game (window title and top right corner) and used in the file names
+RELEASE_VERSION="0.6.5-alpha"   # shown in the game (window title and top right corner) and used in the file names
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
@@ -115,8 +115,8 @@ find . -name CommitInfo.java -path "*generated*" -delete   # make sure the label
 # 24 LAN: new tab "Load game" next to "New match": the host continues a saved game (single player and multiplayer saves are interchangeable).
 #    Position, nation and team are fixed by the save, human/computer type can be changed. Every player needs the same save file; a player
 #    who misses it gets a message instead of joining. The network clock counts lockstep steps from the saved game time.
-# 25 EXPERIMENTAL, LAN only: human players that choose the same color and the same nation play together as ONE player (shared position,
-#    shown with the same position number in the lobby). Remove this patch from PATCH_NAMES if it causes trouble.
+# 25 LAN only: human players that choose the same color and the same nation play together as ONE player (shared position,
+#    shown with the same position number in the lobby).
 # (22 also: requests of destroyed or conquered buildings are dropped, so there are no more "no free settler" messages about a ruin.)
 # 26 Saving: the message "Game saved." is shown; the list of games shows date AND time of the save; the id of a saved game is the same on all
 #    computers of a LAN game (every computer saves when one player saves), so each player can load the save from his own folder.
@@ -127,6 +127,25 @@ find . -name CommitInfo.java -path "*generated*" -delete   # make sure the label
 #    the settings of the new-game window (players, resources, peace time) are centered on the same line as their labels;
 #    fixes a saved game that was loaded into a LAN game: the clock reported the saved game time to the server while the game was loading, so
 #    the server stopped waiting for the players and their commands were executed with a huge delay.
+# 29 Fixes the terrain that was sometimes not drawn (black background, only buildings and units visible, mostly when the map is zoomed far out):
+#    the terrain is drawn line by line, and a line that lies outside of the map got a negative length, which made OpenGL reject the whole
+#    drawing of the terrain. Such lines are skipped now.
+# 30 Construction sites: the panel of a building under construction shows, for diggers and bricklayers, how many the site may use / how many
+#    exist in the settlement, with arrows to change it (never more than exist; the diggers are locked at 0 when the ground is flat). Workers
+#    above a lowered number leave the site and are used by other sites. Without any click the distribution is the same as before.
+#    Settlers' profession settings: with an ABSOLUTE number of diggers / bricklayers, free settlers become diggers / bricklayers until the
+#    number is reached, even when no building asks for them (the tool smithy makes the tools); the arrows change the number by 1 (5 % for
+#    percentages). Switching from % to absolute keeps the real number of diggers / bricklayers instead of the number calculated from the %.
+# 31 Residential buildings (small / medium / big, all nations) show the carrier icon and "Remaining: n" (English / Czech) under the picture of the
+#    building: how many settlers will still come out of the house; the line disappears when all are out. A barracks shows the number of free
+#    settlers that can become soldiers (free settlers not reserved by the minimum number of carriers). The icon keeps its high-rectangle
+#    proportions and the text is centered at the middle of the icon.
+# 32 Peace time and thieves: a thief can be made, but it steals nothing during the peace time (it only walks to the place it was sent to).
+#    When the peace time is over, a thief that was sent to steal during the peace time carries out its order at once.
+# 33 Find building from menu: a right click (two-finger click) on a building button in the build menu selects the nearest own building of that type and centers the map on it; clicking again goes on to the next one.
+# 34 Lobby player slots: after the number of players was lowered and raised again, the slots stayed "unavailable" (no circle with the number in the map preview, wrong start settings). They are available again now.
+# 35 Quit key: the key Q saves the game before it is left (a second press leaves at once), so a key pressed by accident does not lose the game.
+# 36 Workers of a construction site: below the limit/total numbers a second line shows (workers on the site), e.g. "(3)" (a one-line variant "(2)4/20" exists in the code: TWO_LINES).
 say "Applying the patches"
 mkdir -p "$WORK/patches"
 cat > "$WORK/patches/01-lan-multiplayer-broadcast.patch" <<'PATCH_EOF'
@@ -8797,7 +8816,7 @@ index 2df6ae869..acc15333a 100644
  	public void setReplayLogStream(DataOutputStream replayFileStream) {
  		if (this.replayLogStream != null) {
 PATCH_EOF
-cat > "$WORK/patches/25-shared-player-experimental.patch" <<'PATCH_EOF'
+cat > "$WORK/patches/25-shared-player.patch" <<'PATCH_EOF'
 diff --git a/jsettlers.common/src/main/java/jsettlers/common/menu/SharedPlayers.java b/jsettlers.common/src/main/java/jsettlers/common/menu/SharedPlayers.java
 new file mode 100644
 index 000000000..460036c81
@@ -8809,7 +8828,7 @@ index 000000000..460036c81
 +import java.util.List;
 +
 +/**
-+ * Human players of a network game that choose the same color and the same nation play together as one player (experimental). They share the
++ * Human players of a network game that choose the same color and the same nation play together as one player. They share the
 + * position on the map of the one of them that has the lowest position.
 + */
 +public final class SharedPlayers {
@@ -8865,7 +8884,7 @@ index 344f557b0..f56f45d41 100644
  join-game-panel-map-slot = Pozice
  join-game-panel-team = Tým
  join-game-panel-color = Barva
-+join-game-panel-shared-player-tooltip = Stejná barva a národ: tito hráči hrají společně jako jeden hráč (experimentální).
++join-game-panel-shared-player-tooltip = Stejná barva a národ: tito hráči hrají společně jako jeden hráč.
  join-game-panel-send-chat-message = Odeslat
  
  stats-panel-exit = Další
@@ -8877,7 +8896,7 @@ index 9dab50058..84004a547 100644
  join-game-panel-map-slot = Position
  join-game-panel-team = Team
  join-game-panel-color = Color
-+join-game-panel-shared-player-tooltip = Same color and nation: these players play together as one player (experimental).
++join-game-panel-shared-player-tooltip = Same color and nation: these players play together as one player.
  join-game-panel-send-chat-message = Send
  
  stats-panel-exit = Next
@@ -10887,7 +10906,1754 @@ index acc15333a..e5165031d 100644
  	}
  
 PATCH_EOF
-PATCH_NAMES="01-lan-multiplayer-broadcast 02-endgame-player-names 03-gifts-of-the-gods-spell 04-soldiers-ignore-far-civilians 05-font-quality-and-size 06-building-cost-tooltip 07-tooltip-position 08-in-game-messages 09-messages-layout-and-settings-file 10-game-speed-and-fps-limit 11-amazon-storage-shadow 12-language-selection-czech 13-thief-fixes 14-zoom-indicator 15-control-groups 16-peacetime 17-hd-graphics 18-smithy-output 19-auto-work-area 20-convert-specialists-to-bearers 21-faster-growth 22-settler-messages-and-tool-demand 23-lobby-colors-and-positions 24-lan-load-game 25-shared-player-experimental 26-save-game-improvements 27-ingame-chat 28-lobby-peace-time-and-layout"
+cat > "$WORK/patches/29-fix-black-terrain.patch" <<'PATCH_EOF'
+diff --git a/go.graphics.swing/src/main/java/go/graphics/swing/opengl/LWJGLDrawContext.java b/go.graphics.swing/src/main/java/go/graphics/swing/opengl/LWJGLDrawContext.java
+index e688281dc..669191c8b 100644
+--- a/go.graphics.swing/src/main/java/go/graphics/swing/opengl/LWJGLDrawContext.java
++++ b/go.graphics.swing/src/main/java/go/graphics/swing/opengl/LWJGLDrawContext.java
+@@ -453,13 +453,23 @@ public class LWJGLDrawContext extends GLDrawContext {
+ 			fillBackgroundFormat(handle);
+ 		}
+ 
+-		int draw_lines = handle.regionCount;
++		int draw_lines = 0;
++
++		int[] firsts = new int[handle.regionCount];
++		int[] counts = new int[handle.regionCount];
++		for (int i = 0; i != handle.regionCount; i++) {
++			// a single region with a negative count makes OpenGL reject the whole call (nothing is drawn), so such regions are skipped
++			if (handle.regions[i*2] < 0 || handle.regions[i*2+1] <= 0) continue;
++			firsts[draw_lines] = handle.regions[i*2];
++			counts[draw_lines] = handle.regions[i*2+1];
++			draw_lines++;
++		}
++
++		if (draw_lines == 0) return;
+ 
+-		int[] firsts = new int[draw_lines];
+-		int[] counts = new int[draw_lines];
+-		for (int i = 0; i != draw_lines; i++) {
+-			firsts[i] = handle.regions[i*2];
+-			counts[i] = handle.regions[i*2+1];
++		if (draw_lines != firsts.length) {
++			firsts = java.util.Arrays.copyOf(firsts, draw_lines);
++			counts = java.util.Arrays.copyOf(counts, draw_lines);
+ 		}
+ 
+ 		glMultiDrawArrays(GL_TRIANGLES, firsts, counts);
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/Background.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/Background.java
+index 463762dac..7507c309b 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/Background.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/Background.java
+@@ -1226,21 +1226,29 @@ public class Background implements IGraphicsBackgroundListener {
+ 
+ 		backgroundHandle.texture = getTextureData(gl);
+ 
+-		backgroundHandle.regionCount = screenArea.getLines();
+-		backgroundHandle.regions = new int[backgroundHandle.regionCount*2];
+-		for(int i = 0; i < backgroundHandle.regionCount; i++) {
++		// One draw region (first vertex, vertex count) per visible map line. Lines that are completely outside of the map are left out: a region
++		// with a negative or a too long vertex count (it happens when the map is zoomed out so far that its border is visible) makes OpenGL
++		// reject the whole draw call (GL_INVALID_VALUE), and then no terrain is drawn at all (black background, only the objects are visible).
++		int[] newRegions = new int[screenArea.getLines() * 2];
++		int newRegionCount = 0;
++		for(int i = 0; i < screenArea.getLines(); i++) {
++			int y = screenArea.getLineY(i);
++			if(y < 0 || y >= bufferHeight) continue;
++
+ 			int startX = screenArea.getLineStartX(i);
+ 			if(startX < 0) startX = 0;
+ 
+ 			int endX = screenArea.getLineEndX(i);
+ 			if(endX >= bufferWidth) endX = bufferWidth;
+ 
+-			int y = screenArea.getLineY(i);
+-			if(y < 0 || y > bufferHeight) continue;
++			if(endX <= startX) continue;
+ 
+-			backgroundHandle.regions[i*2] = (bufferWidth * y + startX) * 2 * 3;
+-			backgroundHandle.regions[i*2+1] = (endX-startX)* 2 * 3;
++			newRegions[newRegionCount*2] = (bufferWidth * y + startX) * 2 * 3;
++			newRegions[newRegionCount*2+1] = (endX-startX)* 2 * 3;
++			newRegionCount++;
+ 		}
++		backgroundHandle.regions = newRegions;
++		backgroundHandle.regionCount = newRegionCount;
+ 		gl.drawBackground(backgroundHandle);
+ 	}
+ 
+PATCH_EOF
+cat > "$WORK/patches/30-construction-workers.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+index a38735db4..536c4ed79 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+@@ -404,6 +404,13 @@ public enum EActionType {
+ 	CHANGE_MOVABLE_SETTINGS,
+ 	SET_MOVABLE_LIMIT_TYPE,
+ 
++	/**
++	 * Increases or decreases the number of diggers or bricklayers that work on a construction site.
++	 *
++	 * @see SetConstructionWorkersAction
++	 */
++	SET_CONSTRUCTION_WORKERS,
++
+ 	TOGGLE_MUSIC,
+ 	MUSIC_VOLUME_UP,
+ 	MUSIC_VOLUME_DOWN;
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/SetConstructionWorkersAction.java b/jsettlers.common/src/main/java/jsettlers/common/action/SetConstructionWorkersAction.java
+new file mode 100644
+index 000000000..0f0807da8
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/SetConstructionWorkersAction.java
+@@ -0,0 +1,54 @@
++/*
++ * Copyright (c) 2018
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++package jsettlers.common.action;
++
++import jsettlers.common.position.ShortPoint2D;
++
++/**
++ * The user wants to change how many diggers or bricklayers (at most) work on the selected construction site.
++ */
++public class SetConstructionWorkersAction extends Action {
++
++	private final ShortPoint2D position;
++	private final boolean bricklayers;
++	private final int change;
++
++	/**
++	 * @param position
++	 *            The position of the construction site.
++	 * @param bricklayers
++	 *            true to change the number of bricklayers, false to change the number of diggers.
++	 * @param change
++	 *            The change of the limit (+1 or -1).
++	 */
++	public SetConstructionWorkersAction(ShortPoint2D position, boolean bricklayers, int change) {
++		super(EActionType.SET_CONSTRUCTION_WORKERS);
++		this.position = position;
++		this.bricklayers = bricklayers;
++		this.change = change;
++	}
++
++	public ShortPoint2D getPosition() {
++		return position;
++	}
++
++	public boolean isBricklayers() {
++		return bricklayers;
++	}
++
++	public int getChange() {
++		return change;
++	}
++}
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java b/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java
+index 8fa29ca5c..e4bbfd89d 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java
+@@ -64,6 +64,63 @@ public interface IBuilding extends IMapObject, IPlayerable, ISelectable, ILocata
+ 	 */
+ 	boolean isOccupied();
+ 
++	/**
++	 * @return The number of diggers that currently work on this construction site.
++	 */
++	default int getAssignedDiggers() {
++		return 0;
++	}
++
++	/**
++	 * @return The number of diggers that may work on this construction site at the same time (automatic or set by the player).
++	 */
++	default int getDiggerLimit() {
++		return 0;
++	}
++
++	/**
++	 * @return The number of diggers of the player (in the whole settlement).
++	 */
++	default int getTotalDiggers() {
++		return 0;
++	}
++
++	/**
++	 * @return The number of bricklayers of the player (in the whole settlement).
++	 */
++	default int getTotalBricklayers() {
++		return 0;
++	}
++
++	/**
++	 * @return The highest limit of diggers the player can set for this construction site (never more than the diggers that exist). 0 if the
++	 *         site needs no diggers (any more).
++	 */
++	default int getMaxDiggers() {
++		return 0;
++	}
++
++	/**
++	 * @return The number of bricklayers that currently work on this construction site.
++	 */
++	default int getAssignedBricklayers() {
++		return 0;
++	}
++
++	/**
++	 * @return The number of bricklayers that may work on this construction site at the same time (automatic or set by the player).
++	 */
++	default int getBricklayerLimit() {
++		return 0;
++	}
++
++	/**
++	 * @return The highest limit of bricklayers the player can set for this construction site (never more than the bricklayers that exist).
++	 */
++	default int getMaxBricklayers() {
++		return 0;
++	}
++
+ 	/**
+ 	 * Gets the materials this building produces or needs.
+ 	 * <p>
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/profession/ProfessionPanel.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/profession/ProfessionPanel.java
+index 778cfd2cf..2494d2247 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/profession/ProfessionPanel.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/profession/ProfessionPanel.java
+@@ -157,8 +157,9 @@ public class ProfessionPanel extends AbstractContentProvider implements UiConten
+ 
+ 				add(Panel.box(targetLabel, 20f, 20f), 10f, 5f);
+ 				add(Panel.box(new CountArrows(
+-						() -> new ChangeMovableSettingsAction(type, true, 5, position),
+-						() -> new ChangeMovableSettingsAction(type, true, -5, position)
++						// 5 % steps, but single settlers when an absolute number is set
++						() -> new ChangeMovableSettingsAction(type, true, data != null && !data.isRelative() ? 1 : 5, position),
++						() -> new ChangeMovableSettingsAction(type, true, data != null && !data.isRelative() ? -1 : -5, position)
+ 				), 12f, 18f), 30, 5f);
+ 				add(Panel.box(descLabel, 30, 20f), 42f, 5f);
+ 				add(Panel.box(percentButton, 40, 20), 77, 5);
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+index 12ed49ef6..d9c051c51 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+@@ -28,6 +28,7 @@ import jsettlers.common.images.OriginalImageLink;
+ import jsettlers.common.material.EMaterialType;
+ import jsettlers.common.material.EPriority;
+ import jsettlers.common.action.EActionType;
++import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.movable.ESoldierClass;
+ import jsettlers.common.movable.ESoldierType;
+ import jsettlers.common.movable.IGraphicsMovable;
+@@ -36,6 +37,7 @@ import jsettlers.common.action.Action;
+ import jsettlers.graphics.action.AskSetTradingWaypointAction;
+ import jsettlers.common.action.ChangeTradingRequestAction;
+ import jsettlers.common.action.SetBuildingPriorityAction;
++import jsettlers.common.action.SetConstructionWorkersAction;
+ import jsettlers.common.action.SetTradingWaypointAction;
+ import jsettlers.common.action.SetTradingWaypointAction.EWaypointType;
+ import jsettlers.common.action.SoldierAction;
+@@ -49,6 +51,7 @@ import jsettlers.graphics.map.draw.ECommonLinkType;
+ import jsettlers.graphics.map.draw.ImageLinkMap;
+ import jsettlers.graphics.map.draw.ImageProvider;
+ import jsettlers.graphics.ui.Button;
++import jsettlers.graphics.ui.CountArrows;
+ import jsettlers.graphics.ui.Label;
+ import jsettlers.graphics.ui.UIElement;
+ import jsettlers.graphics.ui.UIPanel;
+@@ -389,9 +392,82 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+ 
+ 		addRequestAndOfferStacks(layout.materialArea, state);
+ 
++		if (state.isConstruction()) {
++			addConstructionWorkers(layout.background);
++		}
++
+ 		return layout._root;
+ 	}
+ 
++	/** Size of the panel of the building (see BuildingSelectionLayout.xml) in pixels. */
++	private static final float PANEL_WIDTH_PX = 127 - 9;
++	private static final float PANEL_HEIGHT_PX = 435 - 219;
++	/** The row with the workers of a construction site: between the picture of the building and the required materials. */
++	private static final float WORKERS_TOP_PX = 360 - 219;
++	private static final float WORKERS_HEIGHT_PX = 18;
++
++	/**
++	 * Adds the numbers of diggers and bricklayers (working / limit) of a construction site with the arrows to change the limits.
++	 */
++	private void addConstructionWorkers(UIPanel background) {
++		float top = 1 - WORKERS_TOP_PX / PANEL_HEIGHT_PX;
++		float bottom = top - WORKERS_HEIGHT_PX / PANEL_HEIGHT_PX;
++		float half = 59f / PANEL_WIDTH_PX;
++
++		// the panel stays when the diggers are not needed any more (the number is 0 then and cannot be changed)
++		if (building.getBuildingVariant().getProtectedTiles().length > 0) {
++			background.addChild(new ConstructionWorkersPanel(building, false), 0f, bottom, half, top);
++		}
++		if (building.getBuildingVariant().getBricklayers().length > 0) {
++			background.addChild(new ConstructionWorkersPanel(building, true), half, bottom, 2 * half, top);
++		}
++	}
++
++	/**
++	 * Shows how many diggers or bricklayers the construction site may use out of all the diggers or bricklayers of the settlement, with arrows to
++	 * change it. Without changes of the player it is the number of workers the site needs.
++	 */
++	public static class ConstructionWorkersPanel extends UIPanel {
++		private static final float CELL_WIDTH_PX = 59;
++		private static final float ICON_WIDTH = 18f / CELL_WIDTH_PX;
++		private static final float LABEL_WIDTH = 27f / CELL_WIDTH_PX;
++		private static final float ARROWS_WIDTH = 12f / CELL_WIDTH_PX;
++
++		private final IBuilding building;
++		private final boolean bricklayers;
++		private final Label label = new Label("", EFontSize.NORMAL);
++		private String shownText = null;
++
++		public ConstructionWorkersPanel(IBuilding building, boolean bricklayers) {
++			this.building = building;
++			this.bricklayers = bricklayers;
++
++			UIPanel icon = new UIPanel();
++			icon.setBackground((bricklayers ? EMovableType.BRICKLAYER : EMovableType.DIGGER).getTool().getIcon());
++
++			CountArrows arrows = new CountArrows(
++					() -> new SetConstructionWorkersAction(building.getPosition(), bricklayers, 1),
++					() -> new SetConstructionWorkersAction(building.getPosition(), bricklayers, -1));
++
++			float left = 0;
++			addChild(icon, left, 0f, left += ICON_WIDTH, 1f);
++			addChild(label, left, 0f, left += LABEL_WIDTH, 1f);
++			addChild(arrows, left, 0f, left += ARROWS_WIDTH, 1f);
++		}
++
++		@Override
++		public void drawAt(GLDrawContext gl) {
++			int total = bricklayers ? building.getTotalBricklayers() : building.getTotalDiggers();
++			int limit = Math.min(bricklayers ? building.getBricklayerLimit() : building.getDiggerLimit(), total);
++			String text = limit + "/" + total;
++			if (!text.equals(shownText)) {
++				shownText = text;
++				label.setText(text);
++			}
++			super.drawAt(gl);
++		}
++	}
++
+ 	private void loadPriorityButton(BuildingBackgroundPanel background, PriorityButton priority, BuildingState state) {
+ 		EPriority[] supported = state.getSupportedPriorities();
+ 		if (supported.length < 2) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+index 81e4e3ea5..33a5bbf8c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+@@ -49,6 +49,7 @@ import jsettlers.common.action.SetBuildingPriorityAction;
+ import jsettlers.common.action.SetDockAction;
+ import jsettlers.common.action.SetMaterialDistributionSettingsAction;
+ import jsettlers.common.action.SetMaterialPrioritiesAction;
++import jsettlers.common.action.SetConstructionWorkersAction;
+ import jsettlers.common.action.SetMaterialProductionAction;
+ import jsettlers.common.action.ChangeMovableSettingsAction;
+ import jsettlers.common.action.SetMovableLimitTypeAction;
+@@ -87,6 +88,7 @@ import jsettlers.input.tasks.MovableGuiTask;
+ import jsettlers.input.tasks.MoveToGuiTask;
+ import jsettlers.input.tasks.OrderShipGuiTask;
+ import jsettlers.input.tasks.SetAcceptedStockMaterialGuiTask;
++import jsettlers.input.tasks.ConstructionWorkersGuiTask;
+ import jsettlers.input.tasks.SetBuildingPriorityGuiTask;
+ import jsettlers.input.tasks.SetDockGuiTask;
+ import jsettlers.input.tasks.SetMaterialDistributionSettingsGuiTask;
+@@ -379,6 +381,12 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 				break;
+ 			}
+ 
++			case SET_CONSTRUCTION_WORKERS: {
++				final SetConstructionWorkersAction a = (SetConstructionWorkersAction) action;
++				taskScheduler.scheduleTask(new ConstructionWorkersGuiTask(playerId, a.getPosition(), a.isBricklayers(), a.getChange()));
++				break;
++			}
++
+ 			case NEXT_OF_TYPE:
+ 				selectNextOfType();
+ 				break;
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+index 3dfc7b1fc..1c68856b6 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+@@ -42,6 +42,7 @@ import jsettlers.input.tasks.EGuiAction;
+ import jsettlers.input.tasks.MovableGuiTask;
+ import jsettlers.input.tasks.MoveToGuiTask;
+ import jsettlers.input.tasks.OrderShipGuiTask;
++import jsettlers.input.tasks.ConstructionWorkersGuiTask;
+ import jsettlers.input.tasks.PeaceTimeGuiTask;
+ import jsettlers.input.tasks.SetAcceptedStockMaterialGuiTask;
+ import jsettlers.input.tasks.SetBuildingPriorityGuiTask;
+@@ -249,6 +250,12 @@ class GuiTaskExecutor implements ITaskExecutor {
+ 				break;
+ 			}
+ 
++			case SET_CONSTRUCTION_WORKERS: {
++				ConstructionWorkersGuiTask task = (ConstructionWorkersGuiTask) guiTask;
++				this.<Building>forBuilding(task, building -> building.changeConstructionWorkerLimit(task.isBricklayers(), task.getChange()));
++				break;
++			}
++
+ 			case SET_PEACE_TIME: {
+ 				PeaceTimeGuiTask task = (PeaceTimeGuiTask) guiTask;
+ 				MatchConstants.setPeaceTimeEnd(task.getMinutes() * 60 * 1000);
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/tasks/ConstructionWorkersGuiTask.java b/jsettlers.logic/src/main/java/jsettlers/input/tasks/ConstructionWorkersGuiTask.java
+new file mode 100644
+index 000000000..c6c03957d
+--- /dev/null
++++ b/jsettlers.logic/src/main/java/jsettlers/input/tasks/ConstructionWorkersGuiTask.java
+@@ -0,0 +1,63 @@
++package jsettlers.input.tasks;
++
++import java.io.DataInputStream;
++import java.io.DataOutputStream;
++import java.io.IOException;
++
++import jsettlers.common.position.ShortPoint2D;
++
++/**
++ * Changes the limit of diggers or bricklayers that work on a construction site. A normal lockstep task, so it works in network games and replays.
++ */
++public class ConstructionWorkersGuiTask extends SimpleBuildingGuiTask {
++	private boolean bricklayers;
++	private int change;
++
++	public ConstructionWorkersGuiTask() {
++	}
++
++	public ConstructionWorkersGuiTask(byte playerId, ShortPoint2D buildingPos, boolean bricklayers, int change) {
++		super(EGuiAction.SET_CONSTRUCTION_WORKERS, playerId, buildingPos);
++		this.bricklayers = bricklayers;
++		this.change = change;
++	}
++
++	public boolean isBricklayers() {
++		return bricklayers;
++	}
++
++	public int getChange() {
++		return change;
++	}
++
++	@Override
++	protected void serializeTask(DataOutputStream dos) throws IOException {
++		super.serializeTask(dos);
++		dos.writeBoolean(bricklayers);
++		dos.writeInt(change);
++	}
++
++	@Override
++	protected void deserializeTask(DataInputStream dis) throws IOException {
++		super.deserializeTask(dis);
++		bricklayers = dis.readBoolean();
++		change = dis.readInt();
++	}
++
++	@Override
++	public boolean equals(Object o) {
++		if (this == o) {
++			return true;
++		}
++		if (!(o instanceof ConstructionWorkersGuiTask) || !super.equals(o)) {
++			return false;
++		}
++		ConstructionWorkersGuiTask other = (ConstructionWorkersGuiTask) o;
++		return bricklayers == other.bricklayers && change == other.change;
++	}
++
++	@Override
++	public int hashCode() {
++		return 31 * (31 * super.hashCode() + (bricklayers ? 1 : 0)) + change;
++	}
++}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/tasks/EGuiAction.java b/jsettlers.logic/src/main/java/jsettlers/input/tasks/EGuiAction.java
+index 2ceef0413..be514d038 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/tasks/EGuiAction.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/tasks/EGuiAction.java
+@@ -64,6 +64,13 @@ public enum EGuiAction {
+ 	 * @see PeaceTimeGuiTask
+ 	 */
+ 	SET_PEACE_TIME,
++
++	/**
++	 * Changes the number of diggers or bricklayers that may work on a construction site.
++	 *
++	 * @see ConstructionWorkersGuiTask
++	 */
++	SET_CONSTRUCTION_WORKERS,
+ 	;
+ 
+ 	public static final EGuiAction[] VALUES = values();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java
+index 7cd1c5b98..91c360cd5 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java
+@@ -38,6 +38,7 @@ import jsettlers.common.mapobject.EMapObjectType;
+ import jsettlers.common.material.EMaterialType;
+ import jsettlers.common.material.EPriority;
+ import jsettlers.common.movable.EDirection;
++import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.player.IPlayerable;
+ import jsettlers.common.position.RelativePoint;
+ import jsettlers.common.position.ShortPoint2D;
+@@ -64,6 +65,8 @@ import jsettlers.logic.buildings.workers.WorkerBuilding;
+ import jsettlers.logic.constants.Constants;
+ import jsettlers.logic.constants.MatchConstants;
+ import jsettlers.logic.map.grid.objects.AbstractHexMapObject;
++import jsettlers.logic.map.grid.partition.manager.manageables.IManageableBricklayer;
++import jsettlers.logic.map.grid.partition.manager.manageables.IManageableDigger;
+ import jsettlers.logic.map.grid.partition.manager.manageables.interfaces.IConstructableBuilding;
+ import jsettlers.logic.map.grid.partition.manager.manageables.interfaces.IDiggerRequester;
+ import jsettlers.logic.movable.interfaces.IDebugable;
+@@ -107,6 +110,13 @@ public abstract class Building extends AbstractHexMapObject implements IConstruc
+ 
+ 	private transient boolean selected;
+ 
++	/** Limits of the workers on the construction site set by the player: 0 = automatic, otherwise the limit + 1. */
++	private byte diggerLimitSetting = 0;
++	private byte bricklayerLimitSetting = 0;
++	/** The diggers / bricklayers that currently work on this construction site (null in games saved before they were tracked). */
++	private ArrayList<IManageableDigger> assignedDiggers = new ArrayList<>();
++	private ArrayList<IManageableBricklayer> assignedBricklayers = new ArrayList<>();
++
+ 	protected Building(EBuildingType type, Player player, ShortPoint2D position, IBuildingsGrid buildingsGrid) {
+ 		this.type = type;
+ 		this.pos = position;
+@@ -134,6 +144,12 @@ public abstract class Building extends AbstractHexMapObject implements IConstruc
+ 
+ 	void setState(EBuildingState newState) {
+ 		short oldVD = getVD();
++		if (newState != EBuildingState.IN_FLATTERNING && assignedDiggers != null) {
++			assignedDiggers.clear(); // the diggers notice it themselves and go back to the jobless ones
++		}
++		if (newState != EBuildingState.BRICKLAYERS_REQUESTED && assignedBricklayers != null) {
++			assignedBricklayers.clear();
++		}
+ 		this.state = newState;
+ 		short newVD = getVD();
+ 		if(fow && oldVD != newVD) {
+@@ -294,9 +310,9 @@ public abstract class Building extends AbstractHexMapObject implements IConstruc
+ 			}
+ 
+ 			this.heightAvg = (byte) (heightSum / protectedTiles.length);
+-			byte numberOfDiggers = (byte) Math.ceil(((float) protectedTiles.length) / Constants.TILES_PER_DIGGER);
+-
+-			grid.requestDiggers(this, numberOfDiggers);
++			if (getDiggerLimit() > 0) {
++				grid.requestDiggers(this, (byte) getDiggerLimit());
++			}
+ 		}
+ 	}
+ 
+@@ -592,6 +608,157 @@ public abstract class Building extends AbstractHexMapObject implements IConstruc
+ 		return state == EBuildingState.IN_FLATTERNING;
+ 	}
+ 
++	/** The number of diggers the construction site gets without the player changing it. */
++	private int getAutomaticDiggers() {
++		RelativePoint[] tiles = getFlattenTiles();
++		return (int) Math.ceil(((float) tiles.length) / Constants.TILES_PER_DIGGER);
++	}
++
++	/** Diggers are only needed until the ground of the site is flat. */
++	private boolean needsDiggers() {
++		return state == EBuildingState.CREATED || state == EBuildingState.IN_FLATTERNING;
++	}
++
++	/** The highest number of diggers that can be useful at this construction site (not limited by the number of existing diggers). */
++	private int getSiteMaxDiggers() {
++		if (!needsDiggers()) {
++			return 0;
++		}
++		int automatic = getAutomaticDiggers();
++		return automatic == 0 ? 0 : Math.max(automatic, Math.min(getFlattenTiles().length, 2 * automatic));
++	}
++
++	@Override
++	public int getTotalDiggers() {
++		return player.getSettlerInformation().getMovableCount(EMovableType.DIGGER);
++	}
++
++	@Override
++	public int getTotalBricklayers() {
++		return player.getSettlerInformation().getMovableCount(EMovableType.BRICKLAYER);
++	}
++
++	@Override
++	public int getMaxDiggers() {
++		return Math.min(getSiteMaxDiggers(), getTotalDiggers());
++	}
++
++	@Override
++	public int getDiggerLimit() {
++		int max = getSiteMaxDiggers();
++		return diggerLimitSetting == 0 ? Math.min(getAutomaticDiggers(), max) : Math.min(diggerLimitSetting - 1, max);
++	}
++
++	@Override
++	public int getAssignedDiggers() {
++		return assignedDiggers == null ? 0 : assignedDiggers.size();
++	}
++
++	@Override
++	public boolean canAcceptDigger() {
++		return getAssignedDiggers() < getDiggerLimit();
++	}
++
++	@Override
++	public void diggerAssigned(IManageableDigger digger) {
++		if (assignedDiggers == null) {
++			assignedDiggers = new ArrayList<>();
++		}
++		if (!assignedDiggers.contains(digger)) {
++			assignedDiggers.add(digger);
++		}
++	}
++
++	@Override
++	public void diggerReleased(IManageableDigger digger) {
++		if (assignedDiggers != null) {
++			assignedDiggers.remove(digger);
++		}
++	}
++
++	/** The number of places for bricklayers around the construction site (not limited by the number of existing bricklayers). */
++	private int getSiteMaxBricklayers() {
++		if (state == EBuildingState.CONSTRUCTED || state == EBuildingState.DESTROYED) {
++			return 0;
++		}
++		return getBuildingVariant().getBricklayers().length;
++	}
++
++	@Override
++	public int getMaxBricklayers() {
++		return Math.min(getSiteMaxBricklayers(), getTotalBricklayers());
++	}
++
++	@Override
++	public int getBricklayerLimit() {
++		int max = getSiteMaxBricklayers();
++		return bricklayerLimitSetting == 0 ? max : Math.min(bricklayerLimitSetting - 1, max);
++	}
++
++	@Override
++	public int getAssignedBricklayers() {
++		return assignedBricklayers == null ? 0 : assignedBricklayers.size();
++	}
++
++	@Override
++	public boolean canAcceptBricklayer() {
++		return getAssignedBricklayers() < getBricklayerLimit();
++	}
++
++	@Override
++	public void bricklayerAssigned(IManageableBricklayer bricklayer) {
++		if (assignedBricklayers == null) {
++			assignedBricklayers = new ArrayList<>();
++		}
++		if (!assignedBricklayers.contains(bricklayer)) {
++			assignedBricklayers.add(bricklayer);
++		}
++	}
++
++	@Override
++	public void bricklayerReleased(IManageableBricklayer bricklayer) {
++		if (assignedBricklayers != null) {
++			assignedBricklayers.remove(bricklayer);
++		}
++	}
++
++	/**
++	 * Changes the number of diggers or bricklayers that may work on this construction site at the same time. If there are more workers than the
++	 * new limit, the surplus workers leave the site (and are free for other construction sites). The other construction sites use the free
++	 * workers automatically.
++	 *
++	 * @param bricklayers
++	 *            true to change the bricklayers, false to change the diggers.
++	 * @param change
++	 *            The change of the limit.
++	 */
++	public void changeConstructionWorkerLimit(boolean bricklayers, int change) {
++		// the player sees the limit reduced to the number of existing workers, so the change starts from that number
++		int max = bricklayers ? getMaxBricklayers() : getMaxDiggers();
++		int oldLimit = Math.min(bricklayers ? getBricklayerLimit() : getDiggerLimit(), max);
++		int newLimit = Math.max(0, Math.min(max, oldLimit + change));
++		if (newLimit == oldLimit) {
++			return;
++		}
++
++		if (bricklayers) {
++			bricklayerLimitSetting = (byte) (newLimit == getSiteMaxBricklayers() ? 0 : newLimit + 1);
++			while (assignedBricklayers != null && assignedBricklayers.size() > newLimit) {
++				IManageableBricklayer surplus = assignedBricklayers.remove(assignedBricklayers.size() - 1);
++				surplus.releaseConstructionJob(); // it asks for the replacement of its place itself, the place is served again when the limit allows it
++			}
++		} else {
++			diggerLimitSetting = (byte) (newLimit == getAutomaticDiggers() ? 0 : newLimit + 1);
++			if (newLimit > oldLimit && state == EBuildingState.IN_FLATTERNING) {
++				grid.requestDiggers(this, (byte) (newLimit - oldLimit));
++			}
++			while (assignedDiggers != null && assignedDiggers.size() > newLimit) {
++				IManageableDigger surplus = assignedDiggers.remove(assignedDiggers.size() - 1);
++				surplus.releaseDiggerJob();
++			}
++		}
++	}
++
+ 	@Override
+ 	public void diggerRequestFailed() {
+ 		if (isDiggerRequestActive()) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+index 041fcd03b..4f66692cd 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+@@ -48,6 +48,7 @@ import jsettlers.logic.map.grid.partition.manager.materials.offers.OffersList;
+ import jsettlers.logic.map.grid.partition.manager.materials.requests.MaterialRequestObject;
+ import jsettlers.logic.map.grid.partition.manager.objects.BricklayerRequest;
+ import jsettlers.logic.map.grid.partition.manager.objects.DiggerRequest;
++import jsettlers.logic.map.grid.partition.manager.objects.ProfessionTargetRequest;
+ import jsettlers.logic.map.grid.partition.manager.objects.SoldierCreationRequest;
+ import jsettlers.logic.map.grid.partition.manager.objects.WorkerCreationRequest;
+ import jsettlers.logic.map.grid.partition.manager.objects.WorkerRequest;
+@@ -282,6 +283,7 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 
+ 		handleDiggerRequest();
+ 		handleBricklayerRequest();
++		handleProfessionTargets();
+ 
+ 		handleWorkerRequest();
+ 
+@@ -291,6 +293,41 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 		return SCHEDULING_PERIOD;
+ 	}
+ 
++	/**
++	 * With an absolute number of diggers or bricklayers set by the player, free settlers become diggers / bricklayers until the number is
++	 * reached. This does not wait until construction sites ask for workers. (With percentages the settlers only become diggers / bricklayers
++	 * when they are needed, otherwise all free settlers of a big settlement would be converted.)
++	 */
++	private void handleProfessionTargets() {
++		ProfessionSettings professionSettings = settings.getProfessionSettings();
++		boolean carriersReserved = professionSettings.getSettings(EMovableType.BEARER).getRemainingAmount() > -1;
++
++		for (EMovableType type : new EMovableType[] { EMovableType.DIGGER, EMovableType.BRICKLAYER }) {
++			SingleProfessionLimit limit = professionSettings.getSettings(type);
++			int needed = (limit.isRelative() || carriersReserved) ? 0 : (int) Math.floor(limit.getRemainingAmount());
++
++			int pending = 0;
++			Iterator<WorkerCreationRequest> iterator = workerCreationRequests.iterator();
++			while (iterator.hasNext()) {
++				WorkerCreationRequest request = iterator.next();
++				if (request instanceof ProfessionTargetRequest && request.requestedMovableType() == type) {
++					if (pending >= needed) {
++						iterator.remove(); // the number is not wanted any more
++					} else {
++						pending++;
++					}
++				}
++			}
++
++			if (pending < needed) {
++				IManageableBearer bearer = joblessBearer.getAnyObject();
++				if (bearer != null) {
++					workerCreationRequests.offer(new ProfessionTargetRequest(type, bearer.getPosition()));
++				}
++			}
++		}
++	}
++
+ 	private void handleWorkerRequest() {
+ 		WorkerRequest workerRequest = workerRequests.poll();
+ 		if (workerRequest != null && !workerRequest.isRequestAlive()) {
+@@ -426,6 +463,14 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 		}
+ 
+ 		if (request.isRequestAlive()) {
++			if (!request.requester.canAcceptDigger()) {
++				// the construction site has all the diggers it may have (limit): let the next construction site have a go
++				if (diggerRequests.size() > 1) {
++					diggerRequests.offer(diggerRequests.poll());
++				}
++				return;
++			}
++
+ 			IManageableDigger digger = joblessDiggers.removeObjectNextTo(request.getPosition());
+ 			if (digger != null) {
+ 				if (digger.setDiggerJob(request.requester)) {
+@@ -452,6 +497,11 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 	private void handleBricklayerRequest() {
+ 		BricklayerRequest bricklayerRequest = bricklayerRequests.poll();
+ 		if (bricklayerRequest != null && bricklayerRequest.isRequestAlive()) {
++			if (!bricklayerRequest.building.canAcceptBricklayer()) {
++				bricklayerRequests.offerLast(bricklayerRequest); // the construction site has all the bricklayers it may have (limit)
++				return;
++			}
++
+ 			IManageableBricklayer bricklayer = joblessBricklayers.removeObjectNextTo(bricklayerRequest.getPosition());
+ 			if (bricklayer != null) {
+ 				if (!bricklayer.setBricklayerJob(bricklayerRequest.building, bricklayerRequest.bricklayerTargetPos, bricklayerRequest.direction)) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBricklayer.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBricklayer.java
+index 9f702ced5..0a9c7e3b1 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBricklayer.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBricklayer.java
+@@ -32,4 +32,10 @@ public interface IManageableBricklayer extends IManageable {
+ 	boolean setBricklayerJob(IConstructableBuilding constructionSite, ShortPoint2D bricklayerTargetPos, EDirection direction);
+ 
+ 	void convertToBearer();
++
++	/**
++	 * Takes the bricklayer away from its construction site (the limit of bricklayers of the site has been reduced). The bricklayer is jobless
++	 * afterwards.
++	 */
++	void releaseConstructionJob();
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableDigger.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableDigger.java
+index ba26c93b6..c0125aa8e 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableDigger.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableDigger.java
+@@ -28,4 +28,9 @@ public interface IManageableDigger extends IManageable {
+ 	boolean setDiggerJob(IDiggerRequester requester);
+ 
+ 	void convertToBearer();
++
++	/**
++	 * Takes the digger away from its construction site (the limit of diggers of the site has been reduced). The digger is jobless afterwards.
++	 */
++	void releaseDiggerJob();
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IConstructableBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IConstructableBuilding.java
+index 43e776aff..2fa47a7ae 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IConstructableBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IConstructableBuilding.java
+@@ -15,6 +15,7 @@
+ package jsettlers.logic.map.grid.partition.manager.manageables.interfaces;
+ 
+ import jsettlers.common.buildings.BuildingVariant;
++import jsettlers.logic.map.grid.partition.manager.manageables.IManageableBricklayer;
+ import jsettlers.common.movable.EDirection;
+ import jsettlers.common.player.IPlayerable;
+ import jsettlers.common.position.ShortPoint2D;
+@@ -27,4 +28,19 @@ public interface IConstructableBuilding extends IPlayerable {
+ 	boolean isBricklayerRequestActive();
+ 
+ 	void bricklayerRequestFailed(ShortPoint2D bricklayerTargetPos, EDirection lookDirection);
++
++	/**
++	 * @return true if another bricklayer may work on this site (the limit of bricklayers is not reached).
++	 */
++	default boolean canAcceptBricklayer() {
++		return true;
++	}
++
++	/** Called when a bricklayer starts working on this site. */
++	default void bricklayerAssigned(IManageableBricklayer bricklayer) {
++	}
++
++	/** Called when a bricklayer stops working on this site. */
++	default void bricklayerReleased(IManageableBricklayer bricklayer) {
++	}
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IDiggerRequester.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IDiggerRequester.java
+index 772741027..48c2896fa 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IDiggerRequester.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IDiggerRequester.java
+@@ -15,6 +15,7 @@
+ package jsettlers.logic.map.grid.partition.manager.manageables.interfaces;
+ 
+ import jsettlers.common.buildings.BuildingVariant;
++import jsettlers.logic.map.grid.partition.manager.manageables.IManageableDigger;
+ import jsettlers.common.position.ILocatable;
+ 
+ /**
+@@ -45,4 +46,19 @@ public interface IDiggerRequester extends ILocatable {
+ 	byte getAverageHeight();
+ 
+ 	void diggerRequestFailed();
++
++	/**
++	 * @return true if another digger may work for this requester (the limit of diggers is not reached).
++	 */
++	default boolean canAcceptDigger() {
++		return true;
++	}
++
++	/** Called when a digger starts working for this requester. */
++	default void diggerAssigned(IManageableDigger digger) {
++	}
++
++	/** Called when a digger stops working for this requester. */
++	default void diggerReleased(IManageableDigger digger) {
++	}
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/ProfessionTargetRequest.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/ProfessionTargetRequest.java
+new file mode 100644
+index 000000000..5a31b45b2
+--- /dev/null
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/ProfessionTargetRequest.java
+@@ -0,0 +1,53 @@
++/*
++ * Copyright (c) 2018
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++package jsettlers.logic.map.grid.partition.manager.objects;
++
++import java.io.Serializable;
++
++import jsettlers.common.movable.EMovableType;
++import jsettlers.common.position.ILocatable;
++import jsettlers.common.position.ShortPoint2D;
++
++/**
++ * A request for a new digger or bricklayer that is not made by a building, but by the absolute number the player has set in the settlers'
++ * profession settings. It lets free settlers become diggers / bricklayers (and the tool smithy produce the tools) until this number is reached,
++ * even when no construction site needs a worker at the moment.
++ */
++public final class ProfessionTargetRequest extends WorkerCreationRequest implements ILocatable, Serializable {
++	private static final long serialVersionUID = 5163921530474581071L;
++
++	private final EMovableType movableType;
++	private final ShortPoint2D position;
++
++	public ProfessionTargetRequest(EMovableType movableType, ShortPoint2D position) {
++		this.movableType = movableType;
++		this.position = position;
++	}
++
++	@Override
++	public ShortPoint2D getPosition() {
++		return position;
++	}
++
++	@Override
++	public boolean isRequestAlive() {
++		return true; // the partition manager removes the request when the number is not wanted any more
++	}
++
++	@Override
++	public EMovableType requestedMovableType() {
++		return movableType;
++	}
++}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/settings/ProfessionSettings.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/settings/ProfessionSettings.java
+index 640cd1d9b..3e44ecf3c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/settings/ProfessionSettings.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/settings/ProfessionSettings.java
+@@ -118,6 +118,11 @@ public class ProfessionSettings implements Serializable, IProfessionSettings {
+ 			newSettings = new RelativeProfessionLimit(this, currentSettings);
+ 		} else {
+ 			newSettings = new AbsoluteProfessionLimit(this, currentSettings);
++			if (currentSettings.isRelative() && movableType != EMovableType.BEARER) {
++				// Keep the real number of diggers / bricklayers. The number calculated from the percentage can be much higher (the percentage is only
++				// reached when many buildings are under construction), and then the number would jump when the player switches to absolute numbers.
++				newSettings.setLimit(currentSettings.getCurrentCount(), false);
++			}
+ 		}
+ 
+ 		switch (movableType) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BricklayerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BricklayerMovable.java
+index c9ab5e5a7..5c4f40049 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BricklayerMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BricklayerMovable.java
+@@ -59,6 +59,9 @@ public class BricklayerMovable extends CivilianMovable implements IManageableBri
+ 				),
+ 				guard(mov -> !mov.registered,
+ 					action(mov -> {
++						if (mov.constructionSite != null) {
++							mov.constructionSite.bricklayerReleased(mov);
++						}
+ 						mov.constructionSite = null;
+ 						mov.registered = true;
+ 						mov.grid.addJobless(mov);
+@@ -75,6 +78,7 @@ public class BricklayerMovable extends CivilianMovable implements IManageableBri
+ 			this.targetPosition = bricklayerTargetPos;
+ 			this.lookDirection = direction;
+ 			registered = false;
++			constructionSite.bricklayerAssigned(this);
+ 			return true;
+ 		} else {
+ 			return false;
+@@ -96,8 +100,20 @@ public class BricklayerMovable extends CivilianMovable implements IManageableBri
+ 		grid.removeJobless(this);
+ 	}
+ 
++	@Override
++	public void releaseConstructionJob() {
++		if (constructionSite != null) {
++			IConstructableBuilding oldSite = constructionSite;
++			constructionSite = null; // the behaviour registers the bricklayer as jobless
++			oldSite.bricklayerRequestFailed(targetPosition, lookDirection);
++		}
++	}
++
+ 	@Override
+ 	protected void abortJob() {
+-		if(constructionSite != null) constructionSite.bricklayerRequestFailed(targetPosition, lookDirection);
++		if(constructionSite != null) {
++			constructionSite.bricklayerReleased(this);
++			constructionSite.bricklayerRequestFailed(targetPosition, lookDirection);
++		}
+ 	}
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/DiggerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/DiggerMovable.java
+index 2ecc1df3e..047542ed4 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/DiggerMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/DiggerMovable.java
+@@ -60,6 +60,9 @@ public class DiggerMovable extends CivilianMovable implements IManageableDigger
+ 				),
+ 				guard(mov -> !mov.registered,
+ 					action(mov -> {
++						if (mov.requester != null) {
++							mov.requester.diggerReleased(mov);
++						}
+ 						mov.requester = null;
+ 						mov.registered = true;
+ 						mov.grid.addJobless(mov);
+@@ -85,6 +88,7 @@ public class DiggerMovable extends CivilianMovable implements IManageableDigger
+ 		if (this.requester == null) {
+ 			this.requester = requester;
+ 			registered = false;
++			requester.diggerAssigned(this);
+ 			return true;
+ 		} else {
+ 			return false;
+@@ -144,11 +148,21 @@ public class DiggerMovable extends CivilianMovable implements IManageableDigger
+ 		return grid.getHeightAt(pos) != requester.getAverageHeight();
+ 	}
+ 
++	@Override
++	public void releaseDiggerJob() {
++		if (requester != null) {
++			requester.diggerReleased(this);
++			requester = null; // the behaviour registers the digger as jobless
++		}
++	}
++
+ 	@Override
+ 	protected void abortJob() {
+ 		if(requester != null) {
+-			requester.diggerRequestFailed();
++			IDiggerRequester oldRequester = requester;
+ 			requester = null;
++			oldRequester.diggerReleased(this);
++			oldRequester.diggerRequestFailed();
+ 		}
+ 	}
+ }
+PATCH_EOF
+cat > "$WORK/patches/31-settlers-info-in-buildings.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java b/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java
+index e4bbfd89d..31d324948 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java
+@@ -64,6 +64,20 @@ public interface IBuilding extends IMapObject, IPlayerable, ISelectable, ILocata
+ 	 */
+ 	boolean isOccupied();
+ 
++	/**
++	 * @return The number of settlers this finished residential building will still send out, -1 for all other buildings.
++	 */
++	default int getSettlersToSpawn() {
++		return -1;
++	}
++
++	/**
++	 * @return The number of free settlers that can become soldiers in this finished barracks, -1 for all other buildings.
++	 */
++	default int getFreeSettlersForSoldiers() {
++		return -1;
++	}
++
+ 	/**
+ 	 * @return The number of diggers that currently work on this construction site.
+ 	 */
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+index d9c051c51..843514fb3 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+@@ -53,6 +53,7 @@ import jsettlers.graphics.map.draw.ImageProvider;
+ import jsettlers.graphics.ui.Button;
+ import jsettlers.graphics.ui.CountArrows;
+ import jsettlers.graphics.ui.Label;
++import jsettlers.graphics.ui.Label.EHorizontalAlignment;
+ import jsettlers.graphics.ui.UIElement;
+ import jsettlers.graphics.ui.UIPanel;
+ import jsettlers.graphics.ui.layout.BuildingSelectionLayout;
+@@ -394,17 +395,73 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+ 
+ 		if (state.isConstruction()) {
+ 			addConstructionWorkers(layout.background);
++		} else if (building.getSettlersToSpawn() >= 0) {
++			addSettlersInfo(layout.background, true);
++		} else if (building.getFreeSettlersForSoldiers() >= 0) {
++			addSettlersInfo(layout.background, false);
+ 		}
+ 
+ 		return layout._root;
+ 	}
+ 
++	/**
++	 * Adds the line with the settlers that are still coming out of a residential building (it disappears when all are out) or the free settlers
++	 * of a barracks. It uses the same place as the workers of a construction site.
++	 */
++	private void addSettlersInfo(UIPanel background, boolean spawning) {
++		float top = 1 - INFO_TOP_PX / PANEL_HEIGHT_PX;
++		float bottom = top - INFO_HEIGHT_PX / PANEL_HEIGHT_PX;
++		background.addChild(new SettlersInfoPanel(building, spawning), 0f, bottom, 1f, top);
++	}
++
++	/**
++	 * Shows the carrier icon with the number of settlers that will still leave a residential building ("Remaining: n"), or the number of free
++	 * settlers that can be armed in a barracks. The icon is a high rectangle (like in the original menus) and keeps its proportions, the text is
++	 * centered vertically at the middle of the icon.
++	 */
++	public static class SettlersInfoPanel extends UIPanel {
++		private static final float ICON_WIDTH = INFO_ICON_WIDTH_PX / PANEL_WIDTH_PX;
++
++		private final IBuilding building;
++		private final boolean spawning;
++		private final Label label = new Label("", EFontSize.NORMAL, EHorizontalAlignment.LEFT);
++		private String shownText = null;
++
++		public SettlersInfoPanel(IBuilding building, boolean spawning) {
++			this.building = building;
++			this.spawning = spawning;
++
++			UIPanel icon = new UIPanel();
++			icon.setBackground(ImageLinkMap.get(building.getPlayer().getCivilisation(), ECommonLinkType.SETTLER_GUI, EMovableType.BEARER));
++			addChild(icon, 0.03f, 0f, 0.03f + ICON_WIDTH, 1f);
++			addChild(label, 0.05f + ICON_WIDTH, 0f, 1f, 1f);
++		}
++
++		@Override
++		public void drawAt(GLDrawContext gl) {
++			int count = spawning ? building.getSettlersToSpawn() : building.getFreeSettlersForSoldiers();
++			if (count < 0 || (spawning && count == 0)) {
++				return; // all settlers are out of the house
++			}
++			String text = Labels.getString(spawning ? "building_settlers_remaining" : "building_free_settlers", count);
++			if (!text.equals(shownText)) {
++				shownText = text;
++				label.setText(text);
++			}
++			super.drawAt(gl);
++		}
++	}
++
+ 	/** Size of the panel of the building (see BuildingSelectionLayout.xml) in pixels. */
+ 	private static final float PANEL_WIDTH_PX = 127 - 9;
+ 	private static final float PANEL_HEIGHT_PX = 435 - 219;
+ 	/** The row with the workers of a construction site: between the picture of the building and the required materials. */
+ 	private static final float WORKERS_TOP_PX = 360 - 219;
+ 	private static final float WORKERS_HEIGHT_PX = 18;
++	/** The line with the settlers of a finished residential building / barracks: the icon is a high rectangle (about 9:16). */
++	private static final float INFO_TOP_PX = 352 - 219;
++	private static final float INFO_HEIGHT_PX = 26;
++	private static final float INFO_ICON_WIDTH_PX = 14.6f;
+ 
+ 	/**
+ 	 * Adds the numbers of diggers and bricklayers (working / limit) of a construction site with the arrows to change the limits.
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index 155922671..56f93c4dc 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -636,3 +636,5 @@ settings-hd-graphics-restart-short = Změna se projeví po restartu hry.
+ hd-graphics-title = HD grafika
+ hd-graphics-preparing = Zvětšuji původní grafiku (jen poprvé) ...
+ hd-graphics-remaining = zbývá asi %d min
++building_settlers_remaining = Zbývá: %d
++building_free_settlers = Volní osadníci: %d
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 3bfdb7197..63c977cfd 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -642,3 +642,5 @@ settings-hd-graphics-restart-short = The change is applied after the game is res
+ hd-graphics-title = HD graphics
+ hd-graphics-preparing = Enlarging the original graphics (only the first time) ...
+ hd-graphics-remaining = about %d min left
++building_settlers_remaining = Remaining: %d
++building_free_settlers = Free settlers: %d
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/IBuildingsGrid.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/IBuildingsGrid.java
+index 2299b30d2..a91ee6bac 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/IBuildingsGrid.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/IBuildingsGrid.java
+@@ -92,6 +92,11 @@ public interface IBuildingsGrid {
+ 
+ 	void requestSoldierable(IBarrack barrack);
+ 
++	/**
++	 * @return The number of free settlers in the partition of the given barracks that could become soldiers.
++	 */
++	int getFreeSettlersForSoldiers(IBarrack barrack);
++
+ 	void setBlocked(FreeMapArea buildingArea, boolean blocked);
+ 
+ 	void removeBuildingAt(ShortPoint2D pos);
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java
+index 7045270c8..aac438a90 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java
+@@ -83,6 +83,11 @@ public final class Barrack extends WorkAreaBuilding implements IBarrack, IReques
+ 	private static final int WARNING_REPEAT = 120 * 1000;
+ 	private int nextWarningTime = 0;
+ 
++	@Override
++	public int getFreeSettlersForSoldiers() {
++		return isConstructionFinished() ? super.grid.getFreeSettlersForSoldiers(this) : -1;
++	}
++
+ 	@Override
+ 	public void warnNoFreeSettler() {
+ 		int now = MatchConstants.clock().getTime();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/spawn/SpawnBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/spawn/SpawnBuilding.java
+index be3b121fe..09527d5d1 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/spawn/SpawnBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/spawn/SpawnBuilding.java
+@@ -82,6 +82,14 @@ public abstract class SpawnBuilding extends Building {
+ 
+ 	protected abstract byte getProduceLimit();
+ 
++	@Override
++	public int getSettlersToSpawn() {
++		if (getMovableType() != EMovableType.BEARER || !isConstructionFinished()) {
++			return -1;
++		}
++		return Math.max(0, getProduceLimit() - produced);
++	}
++
+ 	@Override
+ 	public boolean cannotWork() {
+ 		return produced >= getProduceLimit();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
+index 71e7c4054..698d9a780 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
+@@ -1940,6 +1940,11 @@ public final class MainGrid implements Serializable {
+ 			partitionsGrid.getPartitionAt(barrack).requestSoldierable(barrack);
+ 		}
+ 
++		@Override
++		public final int getFreeSettlersForSoldiers(IBarrack barrack) {
++			return partitionsGrid.getPartitionAt(barrack).getFreeSettlersForSoldiers();
++		}
++
+ 		@Override
+ 		public final DijkstraAlgorithm getDijkstra() {
+ 			return movablePathfinderGrid.dijkstra;
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+index 4f66692cd..227ddb2fe 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+@@ -446,6 +446,15 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 		}
+ 	}
+ 
++	/**
++	 * @return The number of free settlers that can become soldiers: the free settlers that are not reserved by the minimum number of carriers.
++	 */
++	public int getFreeSettlersForSoldiers() {
++		float remaining = settings.getProfessionSettings().getSettings(EMovableType.BEARER).getRemainingAmount();
++		int notReserved = remaining > -1 ? 0 : (int) Math.floor(-remaining);
++		return Math.min(joblessBearer.size(), notReserved);
++	}
++
+ 	@Override
+ 	public void soldierCreationFulfilled() {
+ 		settings.getProfessionSettings().applyBearerConversion(EMovableType.SWORDSMAN_L1);
+PATCH_EOF
+cat > "$WORK/patches/32-peace-time-thieves.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java
+index 840421a41..8bec122e9 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java
+@@ -5,6 +5,7 @@ import java.util.BitSet;
+ import jsettlers.algorithms.path.Path;
+ import jsettlers.algorithms.simplebehaviortree.Node;
+ import jsettlers.algorithms.simplebehaviortree.Root;
++import jsettlers.common.action.EMoveToType;
+ import jsettlers.common.material.EMaterialType;
+ import jsettlers.common.material.ESearchType;
+ import jsettlers.common.movable.EMovableAction;
+@@ -12,6 +13,7 @@ import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.movable.IGraphicsThief;
+ import jsettlers.common.player.IPlayer;
+ import jsettlers.common.position.ShortPoint2D;
++import jsettlers.logic.constants.MatchConstants;
+ import jsettlers.logic.movable.MovableManager;
+ import jsettlers.logic.movable.other.AttackableHumanMovable;
+ import jsettlers.logic.movable.Movable;
+@@ -39,6 +41,13 @@ public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThi
+ 	 */
+ 	private ShortPoint2D homePos = null;
+ 
++	/**
++	 * A steal order that was given during the peace time. The thief walks there, but steals nothing before the peace time is over. When it is
++	 * over, the thief carries out the order at once (like the soldiers that look for enemies when the peace time ends).
++	 */
++	private ShortPoint2D stealAfterPeace = null;
++	private EMoveToType stealAfterPeaceMoveType = null;
++
+ 	public ThiefMovable(AbstractMovableGrid grid, ShortPoint2D position, Player player, Movable movable) {
+ 		super(grid, EMovableType.THIEF, position, player, movable);
+ 	}
+@@ -50,19 +59,36 @@ public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThi
+ 	public static Node<ThiefMovable> createThiefBehaviour() {
+ 		return guardSelector(
+ 				handleFrozenEffect(),
++				// the peace time is over: carry out the steal order that was given during the peace time
++				guard(mov -> mov.nextTarget == null && mov.stealAfterPeace != null && !MatchConstants.isPeaceTime(),
++					action(mov -> {
++						mov.nextTarget = mov.stealAfterPeace;
++						mov.nextMoveToType = mov.stealAfterPeaceMoveType;
++						mov.stealAfterPeace = null;
++						mov.stealAfterPeaceMoveType = null;
++					})
++				),
+ 				guard(mov -> mov.nextTarget != null,
+ 					action(mov -> {
+ 						mov.goToTarget = null;
+ 						mov.currentTarget = null;
+ 						mov.returnPos = null;
++						mov.stealAfterPeace = null;
++						mov.stealAfterPeaceMoveType = null;
+ 
+ 						// remember where to bring the stolen material to (an order given on enemy ground must not make this position the destination)
+ 						if (mov.homePos == null || mov.isOnOwnGround()) {
+ 							mov.homePos = mov.position;
+ 						}
+ 
++						// nobody steals during the peace time: just go there and steal when the peace time is over
++						if (MatchConstants.isPeaceTime() && mov.nextMoveToType.isWorkOnDestination()) {
++							mov.stealAfterPeace = mov.nextTarget;
++							mov.stealAfterPeaceMoveType = mov.nextMoveToType;
++						}
++
+ 						// steal something
+-						if(mov.nextMoveToType.isWorkOnDestination() && mov.getMaterial() == EMaterialType.NO_MATERIAL) {
++						else if(mov.nextMoveToType.isWorkOnDestination() && mov.getMaterial() == EMaterialType.NO_MATERIAL) {
+ 							Path dijkstraPath = mov.grid.searchDijkstra(mov, mov.nextTarget.x, mov.nextTarget.y, (short) 30, ESearchType.FOREIGN_MATERIAL);
+ 							if (dijkstraPath != null) {
+ 								mov.currentTarget = dijkstraPath.getTargetPosition();
+@@ -130,6 +156,7 @@ public class ThiefMovable extends AttackableHumanMovable implements IGraphicsThi
+ 
+ 	protected static Node<ThiefMovable> stealMaterial() {
+ 		return sequence(
++				condition(mov -> !MatchConstants.isPeaceTime()),
+ 				condition(mov -> mov.grid.fitsSearchType(mov, mov.currentTarget.x, mov.currentTarget.y, ESearchType.FOREIGN_MATERIAL)),
+ 
+ 				playAction(EMovableAction.ACTION1, (short)(ACTION1_DURATION*1000)),
+PATCH_EOF
+cat > "$WORK/patches/33-find-building-from-menu.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+index 536c4ed79..b03c6e613 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+@@ -37,6 +37,13 @@ public enum EActionType {
+ 	 */
+ 	SHOW_CONSTRUCTION_MARK,
+ 
++	/**
++	 * Selects the nearest building of a type and centers the map on it (right click on a building button in the build menu).
++	 *
++	 * @see FindBuildingAction
++	 */
++	FIND_BUILDING,
++
+ 	/**
+ 	 * Destroys the selected items.
+ 	 */
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/FindBuildingAction.java b/jsettlers.common/src/main/java/jsettlers/common/action/FindBuildingAction.java
+new file mode 100644
+index 000000000..85bcf2d66
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/FindBuildingAction.java
+@@ -0,0 +1,44 @@
++/*
++ * Copyright (c) 2018
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++package jsettlers.common.action;
++
++import jsettlers.common.buildings.EBuildingType;
++import jsettlers.common.position.ShortPoint2D;
++
++/**
++ * Asks the logic to select the nearest own building of the given type and to center the map on it. The reference position (normally the center of
++ * the visible map area) is added by the map content before the action is sent to the logic.
++ */
++public class FindBuildingAction extends Action {
++	private final EBuildingType buildingType;
++	private final ShortPoint2D referencePosition;
++
++	public FindBuildingAction(EBuildingType buildingType, ShortPoint2D referencePosition) {
++		super(EActionType.FIND_BUILDING);
++		this.buildingType = buildingType;
++		this.referencePosition = referencePosition;
++	}
++
++	public EBuildingType getBuildingType() {
++		return buildingType;
++	}
++
++	/**
++	 * @return The position the nearest building is searched from, or <code>null</code> if unknown.
++	 */
++	public ShortPoint2D getReferencePosition() {
++		return referencePosition;
++	}
++}
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index 409485cb4..d8f5ab56a 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -51,6 +51,7 @@ import jsettlers.common.CommonConstants;
+ import jsettlers.common.action.Action;
+ import jsettlers.common.action.ChatAction;
+ import jsettlers.common.action.EActionType;
++import jsettlers.common.action.FindBuildingAction;
+ import jsettlers.common.action.GroupAction;
+ import jsettlers.common.action.IAction;
+ import jsettlers.common.action.PointAction;
+@@ -1374,6 +1375,12 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 			startChatInput();
+ 			return;
+ 		}
++		if (action.getActionType() == EActionType.FIND_BUILDING) {
++			// add the center of the visible map area as reference position
++			FloatRectangle screen = context.getScreen().getPosition();
++			ShortPoint2D center = context.getPositionUnder(screen.getCenterX(), screen.getCenterY());
++			action = new FindBuildingAction(((FindBuildingAction) action).getBuildingType(), center);
++		}
+ 		IAction fire = controls.replaceAction(action);
+ 		if (fire != null) {
+ 			getInterfaceConnector().fireAction(fire);
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
+index 21054ae3e..07e7153bd 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/OriginalControls.java
+@@ -23,6 +23,9 @@ import go.graphics.event.GOModalEventHandler;
+ import go.graphics.event.mouse.GODrawEvent;
+ import jsettlers.common.map.shapes.MapRectangle;
+ import jsettlers.common.action.EActionType;
++import jsettlers.common.action.FindBuildingAction;
++import jsettlers.common.action.ShowConstructionMarksAction;
++import jsettlers.common.buildings.EBuildingType;
+ import jsettlers.common.action.EMoveToType;
+ import jsettlers.common.action.IAction;
+ import jsettlers.common.menu.IStartedGame;
+@@ -211,7 +214,15 @@ public class OriginalControls implements IControls {
+ 
+ 	@Override
+ 	public Optional<Action> getActionForMoveTo(UIPoint position, EMoveToType moveToType) {
+-		return getActionFor(position, (relativex, relativey) -> getMoveToForMinimap(relativex, relativey, moveToType));
++		Optional<Action> action = getActionFor(position, (relativex, relativey) -> getMoveToForMinimap(relativex, relativey, moveToType));
++		if (action.isPresent() && action.get().getActionType() == EActionType.SHOW_CONSTRUCTION_MARK) {
++			// right click on a building button of the build menu: find the nearest building of that type instead of placing a new one
++			EBuildingType buildingType = ((ShowConstructionMarksAction) action.get()).getBuildingType();
++			if (buildingType != null) {
++				return Optional.of(new FindBuildingAction(buildingType, null));
++			}
++		}
++		return action;
+ 	}
+ 	
+ 	@Override
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+index 33a5bbf8c..79720821b 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+@@ -38,6 +38,7 @@ import jsettlers.common.action.ChangeTradingRequestAction;
+ import jsettlers.common.action.GroupAction;
+ import jsettlers.common.action.ConvertAction;
+ import jsettlers.common.action.EActionType;
++import jsettlers.common.action.FindBuildingAction;
+ import jsettlers.common.action.EMoveToType;
+ import jsettlers.common.action.IAction;
+ import jsettlers.common.action.MoveToAction;
+@@ -204,6 +205,10 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 				constructionMarksCalculator.setBuilding(buildingVariant);
+ 				break;
+ 
++			case FIND_BUILDING:
++				findBuilding((FindBuildingAction) action);
++				break;
++
+ 			case DEBUG_ACTION:
+ 				for (final ISelectable curr : currentSelection) {
+ 					if (curr instanceof IDebugable) {
+@@ -496,6 +501,58 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 		}
+ 	}
+ 
++	/** Building type and buildings (sorted by distance) of the last right click on a build menu button. Only used for the user interface. */
++	private EBuildingType findBuildingType = null;
++	private List<Building> findBuildingList = new ArrayList<>();
++	private int findBuildingIndex = 0;
++
++	/**
++	 * Selects the nearest own building of the requested type and centers the map on it. Clicking again (while that building is still selected) goes
++	 * on with the next building of that type, so every building can be found. This only changes the user interface, so no lockstep task is needed.
++	 */
++	private void findBuilding(FindBuildingAction action) {
++		final EBuildingType type = action.getBuildingType();
++		if (type == null) {
++			return;
++		}
++
++		final Object selected = currentSelection.getSingle();
++		final boolean continueCycle = type == findBuildingType && findBuildingIndex < findBuildingList.size()
++				&& selected != null && selected == findBuildingList.get(findBuildingIndex);
++
++		if (continueCycle) {
++			// drop buildings that were destroyed in the meantime
++			final Building current = findBuildingList.get(findBuildingIndex);
++			findBuildingList.removeIf(b -> b != current && !Building.getAllBuildings().contains(b));
++			findBuildingIndex = (findBuildingList.indexOf(current) + 1) % findBuildingList.size();
++		} else {
++			final ShortPoint2D reference = action.getReferencePosition();
++			final List<Building> found = new ArrayList<>();
++			for (final Building building : Building.getAllBuildings()) {
++				if (building.getBuildingVariant().isVariantOf(type) && building.getPlayer().getPlayerId() == playerId) {
++					found.add(building);
++				}
++			}
++			if (reference != null) {
++				found.sort(Comparator.comparingLong(b -> {
++					final long dx = b.getPosition().x - reference.x;
++					final long dy = b.getPosition().y - reference.y;
++					return dx * dx + dy * dy;
++				}));
++			}
++			findBuildingType = type;
++			findBuildingList = found;
++			findBuildingIndex = 0;
++		}
++
++		if (findBuildingList.isEmpty()) {
++			return;
++		}
++		final Building target = findBuildingList.get(findBuildingIndex);
++		setSelection(new SelectionSet(target));
++		connector.scrollTo(target.getPosition(), true);
++	}
++
+ 	private void selectNextOfType() {
+ 		if (currentSelection.getSize() != 1) {
+ 			return;
+PATCH_EOF
+cat > "$WORK/patches/34-lobby-slots-available.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+index 80cd4c549..05f5dc0f3 100644
+--- a/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
++++ b/jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java
+@@ -801,6 +801,7 @@ public class JoinGamePanel extends BackgroundPanel {
+ 		addPlayerSlotHeadline();
+ 		for (int i = 0; i < playerSlots.size(); i++) {
+ 			if (i < (int) amount) {
++				playerSlots.get(i).setAvailable(true);
+ 				playerSlots.get(i).addTo(playerSlotsPanel, i + 1);
+ 			} else {
+ 				playerSlots.get(i).setAvailable(false);
+PATCH_EOF
+cat > "$WORK/patches/35-quit-key-saves-game.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+index b03c6e613..74508837a 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+@@ -44,6 +44,11 @@ public enum EActionType {
+ 	 */
+ 	FIND_BUILDING,
+ 
++	/**
++	 * Saves the game and leaves it after that (key Q). A second request leaves the game at once.
++	 */
++	SAVE_AND_EXIT,
++
+ 	/**
+ 	 * Destroys the selected items.
+ 	 */
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index d8f5ab56a..40f170725 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -1057,8 +1057,8 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 		} else if ("o".equalsIgnoreCase(keyCode)) {
+ 			return new Action(EActionType.TOGGLE_ORIGINAL_GRAPHICS);
+ 		} else if ("q".equalsIgnoreCase(keyCode)) {
+-			// TODO: Only show the exit menu.
+-			return new Action(EActionType.EXIT);
++			// the game is saved before it is left, so a key pressed by accident doesn't lose the game
++			return new Action(EActionType.SAVE_AND_EXIT);
+ 		} else if ("w".equalsIgnoreCase(keyCode)) {
+ 			return new Action(EActionType.TOGGLE_FOG_OF_WAR);
+ 		} else if ("z".equalsIgnoreCase(keyCode)) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+index 79720821b..e6ff4cf28 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+@@ -449,6 +449,16 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 				gameStoppable.stopGame();
+ 				break;
+ 
++			case SAVE_AND_EXIT:
++				if (exitAfterSave) {
++					// second request (the saving did not finish, e.g. the game is paused): leave at once
++					gameStoppable.stopGame();
++				} else {
++					exitAfterSave = true;
++					taskScheduler.scheduleTask(new SimpleGuiTask(EGuiAction.QUICK_SAVE, playerId));
++				}
++				break;
++
+ 			case MAKE_FERRY:
+ 				orderShip(EShipType.FERRY);
+ 				break;
+@@ -953,6 +963,16 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 		}
+ 	}
+ 
++	/** true after the key Q was pressed: the game is left as soon as it is saved. */
++	private volatile boolean exitAfterSave = false;
++
++	@Override
++	public void gameSaved() {
++		if (exitAfterSave) {
++			gameStoppable.stopGame();
++		}
++	}
++
+ 	@Override
+ 	public UIState getUIState() {
+ 		return connector.getUIState();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+index 1c68856b6..213308b74 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+@@ -318,6 +318,7 @@ class GuiTaskExecutor implements ITaskExecutor {
+ 			if (player != null) {
+ 				player.showMessage(SimpleMessage.gameSaved());
+ 			}
++			guiInterface.gameSaved();
+ 		} catch (IOException | InterruptedException e) {
+ 			e.printStackTrace();
+ 		}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/ITaskExecutorGuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/ITaskExecutorGuiInterface.java
+index 90529e6c6..d4358921c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/ITaskExecutorGuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/ITaskExecutorGuiInterface.java
+@@ -46,4 +46,10 @@ public interface ITaskExecutorGuiInterface {
+ 	 */
+ 	UIState getUIState();
+ 
++	/**
++	 * Called after the game was saved successfully.
++	 */
++	default void gameSaved() {
++	}
++
+ }
+PATCH_EOF
+cat > "$WORK/patches/36-workers-real-count.patch" <<'PATCH_EOF'
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+index 1f44cfa84..c27b2dd3b 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+@@ -492,8 +492,19 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+ 
+ 		private final IBuilding building;
+ 		private final boolean bricklayers;
+-		private final Label label = new Label("", EFontSize.NORMAL);
++		/**
++		 * true: two lines (limit/total, below it (workers on the site)), false: one line with the number of workers on the site in brackets in
++		 * front of the limit, e.g. "(2)4/20".
++		 */
++		private static final boolean TWO_LINES = true;
++		/** Height of the first line in pixels; the digits of the second line start below it (the row is 18 pixels high). */
++		private static final float FIRST_LINE_PX = 9f;
++		private static final float ROW_PX = 18f;
++
++		private final Label label = new Label("", EFontSize.SMALL, Label.EHorizontalAlignment.CENTER, Label.EVerticalAlignment.TOP);
++		private final Label realLabel = new Label("", EFontSize.SMALL, Label.EHorizontalAlignment.CENTER, Label.EVerticalAlignment.TOP);
+ 		private String shownText = null;
++		private String shownRealText = null;
+ 
+ 		public ConstructionWorkersPanel(IBuilding building, boolean bricklayers) {
+ 			this.building = building;
+@@ -508,7 +519,14 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+ 
+ 			float left = 0;
+ 			addChild(icon, left, 0f, left += ICON_WIDTH, 1f);
+-			addChild(label, left, 0f, left += LABEL_WIDTH, 1f);
++			if (TWO_LINES) {
++				// the top of the digits is at the top of the icon, the second line follows right below the first one
++				addChild(label, left, 1f - FIRST_LINE_PX / ROW_PX, left + LABEL_WIDTH, 1f);
++				addChild(realLabel, left, 0f, left + LABEL_WIDTH, 1f - (FIRST_LINE_PX + 0.5f) / ROW_PX);
++				left += LABEL_WIDTH;
++			} else {
++				addChild(label, left, 0f, left += LABEL_WIDTH, 1f);
++			}
+ 			addChild(arrows, left, 0f, left += ARROWS_WIDTH, 1f);
+ 		}
+ 
+@@ -516,7 +534,18 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+ 		public void drawAt(GLDrawContext gl) {
+ 			int total = bricklayers ? building.getTotalBricklayers() : building.getTotalDiggers();
+ 			int limit = Math.min(bricklayers ? building.getBricklayerLimit() : building.getDiggerLimit(), total);
+-			String text = limit + "/" + total;
++			int real = bricklayers ? building.getAssignedBricklayers() : building.getAssignedDiggers();
++			String text;
++			if (TWO_LINES) {
++				text = limit + "/" + total;
++				String realText = "(" + real + ")";
++				if (!realText.equals(shownRealText)) {
++					shownRealText = realText;
++					realLabel.setText(realText);
++				}
++			} else {
++				text = "(" + real + ")" + limit + "/" + total;
++			}
+ 			if (!text.equals(shownText)) {
+ 				shownText = text;
+ 				label.setText(text);
+PATCH_EOF
+PATCH_NAMES="01-lan-multiplayer-broadcast 02-endgame-player-names 03-gifts-of-the-gods-spell 04-soldiers-ignore-far-civilians 05-font-quality-and-size 06-building-cost-tooltip 07-tooltip-position 08-in-game-messages 09-messages-layout-and-settings-file 10-game-speed-and-fps-limit 11-amazon-storage-shadow 12-language-selection-czech 13-thief-fixes 14-zoom-indicator 15-control-groups 16-peacetime 17-hd-graphics 18-smithy-output 19-auto-work-area 20-convert-specialists-to-bearers 21-faster-growth 22-settler-messages-and-tool-demand 23-lobby-colors-and-positions 24-lan-load-game 25-shared-player 26-save-game-improvements 27-ingame-chat 28-lobby-peace-time-and-layout 29-fix-black-terrain 30-construction-workers 31-settlers-info-in-buildings 32-peace-time-thieves 33-find-building-from-menu 34-lobby-slots-available 35-quit-key-saves-game 36-workers-real-count"
 for P in $PATCH_NAMES; do
 	git apply --check "$WORK/patches/$P.patch" || die "Patch $P cannot be applied - the source code has changed since the tested version."
 	git apply --whitespace=nowarn "$WORK/patches/$P.patch"
@@ -10915,6 +12681,14 @@ grep -q "class SharedPlayers" jsettlers.common/src/main/java/jsettlers/common/me
 grep -q "GAME_SAVED" jsettlers.common/src/main/java/jsettlers/common/menu/messages/EMessageType.java || die "Patch 26 was not applied."
 grep -q "class TextInput" go.graphics/src/main/java/go/graphics/event/TextInput.java || die "Patch 27 was not applied."
 grep -q "PEACE_TIME_CHANGED" jsettlers.network/src/main/java/jsettlers/network/NetworkConstants.java || die "Patch 28 was not applied."
+grep -q "newRegionCount" jsettlers.graphics/src/main/java/jsettlers/graphics/map/draw/Background.java || die "Patch 29 was not applied."
+grep -q "class ProfessionTargetRequest" jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/ProfessionTargetRequest.java || die "Patch 30 was not applied."
+grep -q "getFreeSettlersForSoldiers" jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java || die "Patch 31 was not applied."
+grep -q "stealAfterPeace" jsettlers.logic/src/main/java/jsettlers/logic/movable/specialist/ThiefMovable.java || die "Patch 32 was not applied."
+grep -q "FIND_BUILDING" jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java || die "Patch 33 was not applied."
+grep -q "setAvailable(true)" jsettlers.main.swing/src/main/java/jsettlers/main/swing/menu/joinpanel/JoinGamePanel.java || die "Patch 34 was not applied."
+grep -q "SAVE_AND_EXIT" jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java || die "Patch 35 was not applied."
+grep -q "TWO_LINES" jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java || die "Patch 36 was not applied."
 
 # ---------------------------------------------------------------- compilation
 say "Compiling (the first run takes several minutes, dependencies are downloaded)"

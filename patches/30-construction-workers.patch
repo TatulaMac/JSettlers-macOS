@@ -1,0 +1,983 @@
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+index a38735db4..536c4ed79 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+@@ -404,6 +404,13 @@ public enum EActionType {
+ 	CHANGE_MOVABLE_SETTINGS,
+ 	SET_MOVABLE_LIMIT_TYPE,
+ 
++	/**
++	 * Increases or decreases the number of diggers or bricklayers that work on a construction site.
++	 *
++	 * @see SetConstructionWorkersAction
++	 */
++	SET_CONSTRUCTION_WORKERS,
++
+ 	TOGGLE_MUSIC,
+ 	MUSIC_VOLUME_UP,
+ 	MUSIC_VOLUME_DOWN;
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/SetConstructionWorkersAction.java b/jsettlers.common/src/main/java/jsettlers/common/action/SetConstructionWorkersAction.java
+new file mode 100644
+index 000000000..0f0807da8
+--- /dev/null
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/SetConstructionWorkersAction.java
+@@ -0,0 +1,54 @@
++/*
++ * Copyright (c) 2018
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++package jsettlers.common.action;
++
++import jsettlers.common.position.ShortPoint2D;
++
++/**
++ * The user wants to change how many diggers or bricklayers (at most) work on the selected construction site.
++ */
++public class SetConstructionWorkersAction extends Action {
++
++	private final ShortPoint2D position;
++	private final boolean bricklayers;
++	private final int change;
++
++	/**
++	 * @param position
++	 *            The position of the construction site.
++	 * @param bricklayers
++	 *            true to change the number of bricklayers, false to change the number of diggers.
++	 * @param change
++	 *            The change of the limit (+1 or -1).
++	 */
++	public SetConstructionWorkersAction(ShortPoint2D position, boolean bricklayers, int change) {
++		super(EActionType.SET_CONSTRUCTION_WORKERS);
++		this.position = position;
++		this.bricklayers = bricklayers;
++		this.change = change;
++	}
++
++	public ShortPoint2D getPosition() {
++		return position;
++	}
++
++	public boolean isBricklayers() {
++		return bricklayers;
++	}
++
++	public int getChange() {
++		return change;
++	}
++}
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java b/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java
+index 8fa29ca5c..e4bbfd89d 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java
+@@ -64,6 +64,63 @@ public interface IBuilding extends IMapObject, IPlayerable, ISelectable, ILocata
+ 	 */
+ 	boolean isOccupied();
+ 
++	/**
++	 * @return The number of diggers that currently work on this construction site.
++	 */
++	default int getAssignedDiggers() {
++		return 0;
++	}
++
++	/**
++	 * @return The number of diggers that may work on this construction site at the same time (automatic or set by the player).
++	 */
++	default int getDiggerLimit() {
++		return 0;
++	}
++
++	/**
++	 * @return The number of diggers of the player (in the whole settlement).
++	 */
++	default int getTotalDiggers() {
++		return 0;
++	}
++
++	/**
++	 * @return The number of bricklayers of the player (in the whole settlement).
++	 */
++	default int getTotalBricklayers() {
++		return 0;
++	}
++
++	/**
++	 * @return The highest limit of diggers the player can set for this construction site (never more than the diggers that exist). 0 if the
++	 *         site needs no diggers (any more).
++	 */
++	default int getMaxDiggers() {
++		return 0;
++	}
++
++	/**
++	 * @return The number of bricklayers that currently work on this construction site.
++	 */
++	default int getAssignedBricklayers() {
++		return 0;
++	}
++
++	/**
++	 * @return The number of bricklayers that may work on this construction site at the same time (automatic or set by the player).
++	 */
++	default int getBricklayerLimit() {
++		return 0;
++	}
++
++	/**
++	 * @return The highest limit of bricklayers the player can set for this construction site (never more than the bricklayers that exist).
++	 */
++	default int getMaxBricklayers() {
++		return 0;
++	}
++
+ 	/**
+ 	 * Gets the materials this building produces or needs.
+ 	 * <p>
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/profession/ProfessionPanel.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/profession/ProfessionPanel.java
+index 778cfd2cf..2494d2247 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/profession/ProfessionPanel.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/content/settlers/profession/ProfessionPanel.java
+@@ -157,8 +157,9 @@ public class ProfessionPanel extends AbstractContentProvider implements UiConten
+ 
+ 				add(Panel.box(targetLabel, 20f, 20f), 10f, 5f);
+ 				add(Panel.box(new CountArrows(
+-						() -> new ChangeMovableSettingsAction(type, true, 5, position),
+-						() -> new ChangeMovableSettingsAction(type, true, -5, position)
++						// 5 % steps, but single settlers when an absolute number is set
++						() -> new ChangeMovableSettingsAction(type, true, data != null && !data.isRelative() ? 1 : 5, position),
++						() -> new ChangeMovableSettingsAction(type, true, data != null && !data.isRelative() ? -1 : -5, position)
+ 				), 12f, 18f), 30, 5f);
+ 				add(Panel.box(descLabel, 30, 20f), 42f, 5f);
+ 				add(Panel.box(percentButton, 40, 20), 77, 5);
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+index 12ed49ef6..d9c051c51 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+@@ -28,6 +28,7 @@ import jsettlers.common.images.OriginalImageLink;
+ import jsettlers.common.material.EMaterialType;
+ import jsettlers.common.material.EPriority;
+ import jsettlers.common.action.EActionType;
++import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.movable.ESoldierClass;
+ import jsettlers.common.movable.ESoldierType;
+ import jsettlers.common.movable.IGraphicsMovable;
+@@ -36,6 +37,7 @@ import jsettlers.common.action.Action;
+ import jsettlers.graphics.action.AskSetTradingWaypointAction;
+ import jsettlers.common.action.ChangeTradingRequestAction;
+ import jsettlers.common.action.SetBuildingPriorityAction;
++import jsettlers.common.action.SetConstructionWorkersAction;
+ import jsettlers.common.action.SetTradingWaypointAction;
+ import jsettlers.common.action.SetTradingWaypointAction.EWaypointType;
+ import jsettlers.common.action.SoldierAction;
+@@ -49,6 +51,7 @@ import jsettlers.graphics.map.draw.ECommonLinkType;
+ import jsettlers.graphics.map.draw.ImageLinkMap;
+ import jsettlers.graphics.map.draw.ImageProvider;
+ import jsettlers.graphics.ui.Button;
++import jsettlers.graphics.ui.CountArrows;
+ import jsettlers.graphics.ui.Label;
+ import jsettlers.graphics.ui.UIElement;
+ import jsettlers.graphics.ui.UIPanel;
+@@ -389,9 +392,82 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+ 
+ 		addRequestAndOfferStacks(layout.materialArea, state);
+ 
++		if (state.isConstruction()) {
++			addConstructionWorkers(layout.background);
++		}
++
+ 		return layout._root;
+ 	}
+ 
++	/** Size of the panel of the building (see BuildingSelectionLayout.xml) in pixels. */
++	private static final float PANEL_WIDTH_PX = 127 - 9;
++	private static final float PANEL_HEIGHT_PX = 435 - 219;
++	/** The row with the workers of a construction site: between the picture of the building and the required materials. */
++	private static final float WORKERS_TOP_PX = 360 - 219;
++	private static final float WORKERS_HEIGHT_PX = 18;
++
++	/**
++	 * Adds the numbers of diggers and bricklayers (working / limit) of a construction site with the arrows to change the limits.
++	 */
++	private void addConstructionWorkers(UIPanel background) {
++		float top = 1 - WORKERS_TOP_PX / PANEL_HEIGHT_PX;
++		float bottom = top - WORKERS_HEIGHT_PX / PANEL_HEIGHT_PX;
++		float half = 59f / PANEL_WIDTH_PX;
++
++		// the panel stays when the diggers are not needed any more (the number is 0 then and cannot be changed)
++		if (building.getBuildingVariant().getProtectedTiles().length > 0) {
++			background.addChild(new ConstructionWorkersPanel(building, false), 0f, bottom, half, top);
++		}
++		if (building.getBuildingVariant().getBricklayers().length > 0) {
++			background.addChild(new ConstructionWorkersPanel(building, true), half, bottom, 2 * half, top);
++		}
++	}
++
++	/**
++	 * Shows how many diggers or bricklayers the construction site may use out of all the diggers or bricklayers of the settlement, with arrows to
++	 * change it. Without changes of the player it is the number of workers the site needs.
++	 */
++	public static class ConstructionWorkersPanel extends UIPanel {
++		private static final float CELL_WIDTH_PX = 59;
++		private static final float ICON_WIDTH = 18f / CELL_WIDTH_PX;
++		private static final float LABEL_WIDTH = 27f / CELL_WIDTH_PX;
++		private static final float ARROWS_WIDTH = 12f / CELL_WIDTH_PX;
++
++		private final IBuilding building;
++		private final boolean bricklayers;
++		private final Label label = new Label("", EFontSize.NORMAL);
++		private String shownText = null;
++
++		public ConstructionWorkersPanel(IBuilding building, boolean bricklayers) {
++			this.building = building;
++			this.bricklayers = bricklayers;
++
++			UIPanel icon = new UIPanel();
++			icon.setBackground((bricklayers ? EMovableType.BRICKLAYER : EMovableType.DIGGER).getTool().getIcon());
++
++			CountArrows arrows = new CountArrows(
++					() -> new SetConstructionWorkersAction(building.getPosition(), bricklayers, 1),
++					() -> new SetConstructionWorkersAction(building.getPosition(), bricklayers, -1));
++
++			float left = 0;
++			addChild(icon, left, 0f, left += ICON_WIDTH, 1f);
++			addChild(label, left, 0f, left += LABEL_WIDTH, 1f);
++			addChild(arrows, left, 0f, left += ARROWS_WIDTH, 1f);
++		}
++
++		@Override
++		public void drawAt(GLDrawContext gl) {
++			int total = bricklayers ? building.getTotalBricklayers() : building.getTotalDiggers();
++			int limit = Math.min(bricklayers ? building.getBricklayerLimit() : building.getDiggerLimit(), total);
++			String text = limit + "/" + total;
++			if (!text.equals(shownText)) {
++				shownText = text;
++				label.setText(text);
++			}
++			super.drawAt(gl);
++		}
++	}
++
+ 	private void loadPriorityButton(BuildingBackgroundPanel background, PriorityButton priority, BuildingState state) {
+ 		EPriority[] supported = state.getSupportedPriorities();
+ 		if (supported.length < 2) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+index 81e4e3ea5..33a5bbf8c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+@@ -49,6 +49,7 @@ import jsettlers.common.action.SetBuildingPriorityAction;
+ import jsettlers.common.action.SetDockAction;
+ import jsettlers.common.action.SetMaterialDistributionSettingsAction;
+ import jsettlers.common.action.SetMaterialPrioritiesAction;
++import jsettlers.common.action.SetConstructionWorkersAction;
+ import jsettlers.common.action.SetMaterialProductionAction;
+ import jsettlers.common.action.ChangeMovableSettingsAction;
+ import jsettlers.common.action.SetMovableLimitTypeAction;
+@@ -87,6 +88,7 @@ import jsettlers.input.tasks.MovableGuiTask;
+ import jsettlers.input.tasks.MoveToGuiTask;
+ import jsettlers.input.tasks.OrderShipGuiTask;
+ import jsettlers.input.tasks.SetAcceptedStockMaterialGuiTask;
++import jsettlers.input.tasks.ConstructionWorkersGuiTask;
+ import jsettlers.input.tasks.SetBuildingPriorityGuiTask;
+ import jsettlers.input.tasks.SetDockGuiTask;
+ import jsettlers.input.tasks.SetMaterialDistributionSettingsGuiTask;
+@@ -379,6 +381,12 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 				break;
+ 			}
+ 
++			case SET_CONSTRUCTION_WORKERS: {
++				final SetConstructionWorkersAction a = (SetConstructionWorkersAction) action;
++				taskScheduler.scheduleTask(new ConstructionWorkersGuiTask(playerId, a.getPosition(), a.isBricklayers(), a.getChange()));
++				break;
++			}
++
+ 			case NEXT_OF_TYPE:
+ 				selectNextOfType();
+ 				break;
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+index 3dfc7b1fc..1c68856b6 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+@@ -42,6 +42,7 @@ import jsettlers.input.tasks.EGuiAction;
+ import jsettlers.input.tasks.MovableGuiTask;
+ import jsettlers.input.tasks.MoveToGuiTask;
+ import jsettlers.input.tasks.OrderShipGuiTask;
++import jsettlers.input.tasks.ConstructionWorkersGuiTask;
+ import jsettlers.input.tasks.PeaceTimeGuiTask;
+ import jsettlers.input.tasks.SetAcceptedStockMaterialGuiTask;
+ import jsettlers.input.tasks.SetBuildingPriorityGuiTask;
+@@ -249,6 +250,12 @@ class GuiTaskExecutor implements ITaskExecutor {
+ 				break;
+ 			}
+ 
++			case SET_CONSTRUCTION_WORKERS: {
++				ConstructionWorkersGuiTask task = (ConstructionWorkersGuiTask) guiTask;
++				this.<Building>forBuilding(task, building -> building.changeConstructionWorkerLimit(task.isBricklayers(), task.getChange()));
++				break;
++			}
++
+ 			case SET_PEACE_TIME: {
+ 				PeaceTimeGuiTask task = (PeaceTimeGuiTask) guiTask;
+ 				MatchConstants.setPeaceTimeEnd(task.getMinutes() * 60 * 1000);
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/tasks/ConstructionWorkersGuiTask.java b/jsettlers.logic/src/main/java/jsettlers/input/tasks/ConstructionWorkersGuiTask.java
+new file mode 100644
+index 000000000..c6c03957d
+--- /dev/null
++++ b/jsettlers.logic/src/main/java/jsettlers/input/tasks/ConstructionWorkersGuiTask.java
+@@ -0,0 +1,63 @@
++package jsettlers.input.tasks;
++
++import java.io.DataInputStream;
++import java.io.DataOutputStream;
++import java.io.IOException;
++
++import jsettlers.common.position.ShortPoint2D;
++
++/**
++ * Changes the limit of diggers or bricklayers that work on a construction site. A normal lockstep task, so it works in network games and replays.
++ */
++public class ConstructionWorkersGuiTask extends SimpleBuildingGuiTask {
++	private boolean bricklayers;
++	private int change;
++
++	public ConstructionWorkersGuiTask() {
++	}
++
++	public ConstructionWorkersGuiTask(byte playerId, ShortPoint2D buildingPos, boolean bricklayers, int change) {
++		super(EGuiAction.SET_CONSTRUCTION_WORKERS, playerId, buildingPos);
++		this.bricklayers = bricklayers;
++		this.change = change;
++	}
++
++	public boolean isBricklayers() {
++		return bricklayers;
++	}
++
++	public int getChange() {
++		return change;
++	}
++
++	@Override
++	protected void serializeTask(DataOutputStream dos) throws IOException {
++		super.serializeTask(dos);
++		dos.writeBoolean(bricklayers);
++		dos.writeInt(change);
++	}
++
++	@Override
++	protected void deserializeTask(DataInputStream dis) throws IOException {
++		super.deserializeTask(dis);
++		bricklayers = dis.readBoolean();
++		change = dis.readInt();
++	}
++
++	@Override
++	public boolean equals(Object o) {
++		if (this == o) {
++			return true;
++		}
++		if (!(o instanceof ConstructionWorkersGuiTask) || !super.equals(o)) {
++			return false;
++		}
++		ConstructionWorkersGuiTask other = (ConstructionWorkersGuiTask) o;
++		return bricklayers == other.bricklayers && change == other.change;
++	}
++
++	@Override
++	public int hashCode() {
++		return 31 * (31 * super.hashCode() + (bricklayers ? 1 : 0)) + change;
++	}
++}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/tasks/EGuiAction.java b/jsettlers.logic/src/main/java/jsettlers/input/tasks/EGuiAction.java
+index 2ceef0413..be514d038 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/tasks/EGuiAction.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/tasks/EGuiAction.java
+@@ -64,6 +64,13 @@ public enum EGuiAction {
+ 	 * @see PeaceTimeGuiTask
+ 	 */
+ 	SET_PEACE_TIME,
++
++	/**
++	 * Changes the number of diggers or bricklayers that may work on a construction site.
++	 *
++	 * @see ConstructionWorkersGuiTask
++	 */
++	SET_CONSTRUCTION_WORKERS,
+ 	;
+ 
+ 	public static final EGuiAction[] VALUES = values();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java
+index 7cd1c5b98..91c360cd5 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/Building.java
+@@ -38,6 +38,7 @@ import jsettlers.common.mapobject.EMapObjectType;
+ import jsettlers.common.material.EMaterialType;
+ import jsettlers.common.material.EPriority;
+ import jsettlers.common.movable.EDirection;
++import jsettlers.common.movable.EMovableType;
+ import jsettlers.common.player.IPlayerable;
+ import jsettlers.common.position.RelativePoint;
+ import jsettlers.common.position.ShortPoint2D;
+@@ -64,6 +65,8 @@ import jsettlers.logic.buildings.workers.WorkerBuilding;
+ import jsettlers.logic.constants.Constants;
+ import jsettlers.logic.constants.MatchConstants;
+ import jsettlers.logic.map.grid.objects.AbstractHexMapObject;
++import jsettlers.logic.map.grid.partition.manager.manageables.IManageableBricklayer;
++import jsettlers.logic.map.grid.partition.manager.manageables.IManageableDigger;
+ import jsettlers.logic.map.grid.partition.manager.manageables.interfaces.IConstructableBuilding;
+ import jsettlers.logic.map.grid.partition.manager.manageables.interfaces.IDiggerRequester;
+ import jsettlers.logic.movable.interfaces.IDebugable;
+@@ -107,6 +110,13 @@ public abstract class Building extends AbstractHexMapObject implements IConstruc
+ 
+ 	private transient boolean selected;
+ 
++	/** Limits of the workers on the construction site set by the player: 0 = automatic, otherwise the limit + 1. */
++	private byte diggerLimitSetting = 0;
++	private byte bricklayerLimitSetting = 0;
++	/** The diggers / bricklayers that currently work on this construction site (null in games saved before they were tracked). */
++	private ArrayList<IManageableDigger> assignedDiggers = new ArrayList<>();
++	private ArrayList<IManageableBricklayer> assignedBricklayers = new ArrayList<>();
++
+ 	protected Building(EBuildingType type, Player player, ShortPoint2D position, IBuildingsGrid buildingsGrid) {
+ 		this.type = type;
+ 		this.pos = position;
+@@ -134,6 +144,12 @@ public abstract class Building extends AbstractHexMapObject implements IConstruc
+ 
+ 	void setState(EBuildingState newState) {
+ 		short oldVD = getVD();
++		if (newState != EBuildingState.IN_FLATTERNING && assignedDiggers != null) {
++			assignedDiggers.clear(); // the diggers notice it themselves and go back to the jobless ones
++		}
++		if (newState != EBuildingState.BRICKLAYERS_REQUESTED && assignedBricklayers != null) {
++			assignedBricklayers.clear();
++		}
+ 		this.state = newState;
+ 		short newVD = getVD();
+ 		if(fow && oldVD != newVD) {
+@@ -294,9 +310,9 @@ public abstract class Building extends AbstractHexMapObject implements IConstruc
+ 			}
+ 
+ 			this.heightAvg = (byte) (heightSum / protectedTiles.length);
+-			byte numberOfDiggers = (byte) Math.ceil(((float) protectedTiles.length) / Constants.TILES_PER_DIGGER);
+-
+-			grid.requestDiggers(this, numberOfDiggers);
++			if (getDiggerLimit() > 0) {
++				grid.requestDiggers(this, (byte) getDiggerLimit());
++			}
+ 		}
+ 	}
+ 
+@@ -592,6 +608,157 @@ public abstract class Building extends AbstractHexMapObject implements IConstruc
+ 		return state == EBuildingState.IN_FLATTERNING;
+ 	}
+ 
++	/** The number of diggers the construction site gets without the player changing it. */
++	private int getAutomaticDiggers() {
++		RelativePoint[] tiles = getFlattenTiles();
++		return (int) Math.ceil(((float) tiles.length) / Constants.TILES_PER_DIGGER);
++	}
++
++	/** Diggers are only needed until the ground of the site is flat. */
++	private boolean needsDiggers() {
++		return state == EBuildingState.CREATED || state == EBuildingState.IN_FLATTERNING;
++	}
++
++	/** The highest number of diggers that can be useful at this construction site (not limited by the number of existing diggers). */
++	private int getSiteMaxDiggers() {
++		if (!needsDiggers()) {
++			return 0;
++		}
++		int automatic = getAutomaticDiggers();
++		return automatic == 0 ? 0 : Math.max(automatic, Math.min(getFlattenTiles().length, 2 * automatic));
++	}
++
++	@Override
++	public int getTotalDiggers() {
++		return player.getSettlerInformation().getMovableCount(EMovableType.DIGGER);
++	}
++
++	@Override
++	public int getTotalBricklayers() {
++		return player.getSettlerInformation().getMovableCount(EMovableType.BRICKLAYER);
++	}
++
++	@Override
++	public int getMaxDiggers() {
++		return Math.min(getSiteMaxDiggers(), getTotalDiggers());
++	}
++
++	@Override
++	public int getDiggerLimit() {
++		int max = getSiteMaxDiggers();
++		return diggerLimitSetting == 0 ? Math.min(getAutomaticDiggers(), max) : Math.min(diggerLimitSetting - 1, max);
++	}
++
++	@Override
++	public int getAssignedDiggers() {
++		return assignedDiggers == null ? 0 : assignedDiggers.size();
++	}
++
++	@Override
++	public boolean canAcceptDigger() {
++		return getAssignedDiggers() < getDiggerLimit();
++	}
++
++	@Override
++	public void diggerAssigned(IManageableDigger digger) {
++		if (assignedDiggers == null) {
++			assignedDiggers = new ArrayList<>();
++		}
++		if (!assignedDiggers.contains(digger)) {
++			assignedDiggers.add(digger);
++		}
++	}
++
++	@Override
++	public void diggerReleased(IManageableDigger digger) {
++		if (assignedDiggers != null) {
++			assignedDiggers.remove(digger);
++		}
++	}
++
++	/** The number of places for bricklayers around the construction site (not limited by the number of existing bricklayers). */
++	private int getSiteMaxBricklayers() {
++		if (state == EBuildingState.CONSTRUCTED || state == EBuildingState.DESTROYED) {
++			return 0;
++		}
++		return getBuildingVariant().getBricklayers().length;
++	}
++
++	@Override
++	public int getMaxBricklayers() {
++		return Math.min(getSiteMaxBricklayers(), getTotalBricklayers());
++	}
++
++	@Override
++	public int getBricklayerLimit() {
++		int max = getSiteMaxBricklayers();
++		return bricklayerLimitSetting == 0 ? max : Math.min(bricklayerLimitSetting - 1, max);
++	}
++
++	@Override
++	public int getAssignedBricklayers() {
++		return assignedBricklayers == null ? 0 : assignedBricklayers.size();
++	}
++
++	@Override
++	public boolean canAcceptBricklayer() {
++		return getAssignedBricklayers() < getBricklayerLimit();
++	}
++
++	@Override
++	public void bricklayerAssigned(IManageableBricklayer bricklayer) {
++		if (assignedBricklayers == null) {
++			assignedBricklayers = new ArrayList<>();
++		}
++		if (!assignedBricklayers.contains(bricklayer)) {
++			assignedBricklayers.add(bricklayer);
++		}
++	}
++
++	@Override
++	public void bricklayerReleased(IManageableBricklayer bricklayer) {
++		if (assignedBricklayers != null) {
++			assignedBricklayers.remove(bricklayer);
++		}
++	}
++
++	/**
++	 * Changes the number of diggers or bricklayers that may work on this construction site at the same time. If there are more workers than the
++	 * new limit, the surplus workers leave the site (and are free for other construction sites). The other construction sites use the free
++	 * workers automatically.
++	 *
++	 * @param bricklayers
++	 *            true to change the bricklayers, false to change the diggers.
++	 * @param change
++	 *            The change of the limit.
++	 */
++	public void changeConstructionWorkerLimit(boolean bricklayers, int change) {
++		// the player sees the limit reduced to the number of existing workers, so the change starts from that number
++		int max = bricklayers ? getMaxBricklayers() : getMaxDiggers();
++		int oldLimit = Math.min(bricklayers ? getBricklayerLimit() : getDiggerLimit(), max);
++		int newLimit = Math.max(0, Math.min(max, oldLimit + change));
++		if (newLimit == oldLimit) {
++			return;
++		}
++
++		if (bricklayers) {
++			bricklayerLimitSetting = (byte) (newLimit == getSiteMaxBricklayers() ? 0 : newLimit + 1);
++			while (assignedBricklayers != null && assignedBricklayers.size() > newLimit) {
++				IManageableBricklayer surplus = assignedBricklayers.remove(assignedBricklayers.size() - 1);
++				surplus.releaseConstructionJob(); // it asks for the replacement of its place itself, the place is served again when the limit allows it
++			}
++		} else {
++			diggerLimitSetting = (byte) (newLimit == getAutomaticDiggers() ? 0 : newLimit + 1);
++			if (newLimit > oldLimit && state == EBuildingState.IN_FLATTERNING) {
++				grid.requestDiggers(this, (byte) (newLimit - oldLimit));
++			}
++			while (assignedDiggers != null && assignedDiggers.size() > newLimit) {
++				IManageableDigger surplus = assignedDiggers.remove(assignedDiggers.size() - 1);
++				surplus.releaseDiggerJob();
++			}
++		}
++	}
++
+ 	@Override
+ 	public void diggerRequestFailed() {
+ 		if (isDiggerRequestActive()) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+index 041fcd03b..4f66692cd 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+@@ -48,6 +48,7 @@ import jsettlers.logic.map.grid.partition.manager.materials.offers.OffersList;
+ import jsettlers.logic.map.grid.partition.manager.materials.requests.MaterialRequestObject;
+ import jsettlers.logic.map.grid.partition.manager.objects.BricklayerRequest;
+ import jsettlers.logic.map.grid.partition.manager.objects.DiggerRequest;
++import jsettlers.logic.map.grid.partition.manager.objects.ProfessionTargetRequest;
+ import jsettlers.logic.map.grid.partition.manager.objects.SoldierCreationRequest;
+ import jsettlers.logic.map.grid.partition.manager.objects.WorkerCreationRequest;
+ import jsettlers.logic.map.grid.partition.manager.objects.WorkerRequest;
+@@ -282,6 +283,7 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 
+ 		handleDiggerRequest();
+ 		handleBricklayerRequest();
++		handleProfessionTargets();
+ 
+ 		handleWorkerRequest();
+ 
+@@ -291,6 +293,41 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 		return SCHEDULING_PERIOD;
+ 	}
+ 
++	/**
++	 * With an absolute number of diggers or bricklayers set by the player, free settlers become diggers / bricklayers until the number is
++	 * reached. This does not wait until construction sites ask for workers. (With percentages the settlers only become diggers / bricklayers
++	 * when they are needed, otherwise all free settlers of a big settlement would be converted.)
++	 */
++	private void handleProfessionTargets() {
++		ProfessionSettings professionSettings = settings.getProfessionSettings();
++		boolean carriersReserved = professionSettings.getSettings(EMovableType.BEARER).getRemainingAmount() > -1;
++
++		for (EMovableType type : new EMovableType[] { EMovableType.DIGGER, EMovableType.BRICKLAYER }) {
++			SingleProfessionLimit limit = professionSettings.getSettings(type);
++			int needed = (limit.isRelative() || carriersReserved) ? 0 : (int) Math.floor(limit.getRemainingAmount());
++
++			int pending = 0;
++			Iterator<WorkerCreationRequest> iterator = workerCreationRequests.iterator();
++			while (iterator.hasNext()) {
++				WorkerCreationRequest request = iterator.next();
++				if (request instanceof ProfessionTargetRequest && request.requestedMovableType() == type) {
++					if (pending >= needed) {
++						iterator.remove(); // the number is not wanted any more
++					} else {
++						pending++;
++					}
++				}
++			}
++
++			if (pending < needed) {
++				IManageableBearer bearer = joblessBearer.getAnyObject();
++				if (bearer != null) {
++					workerCreationRequests.offer(new ProfessionTargetRequest(type, bearer.getPosition()));
++				}
++			}
++		}
++	}
++
+ 	private void handleWorkerRequest() {
+ 		WorkerRequest workerRequest = workerRequests.poll();
+ 		if (workerRequest != null && !workerRequest.isRequestAlive()) {
+@@ -426,6 +463,14 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 		}
+ 
+ 		if (request.isRequestAlive()) {
++			if (!request.requester.canAcceptDigger()) {
++				// the construction site has all the diggers it may have (limit): let the next construction site have a go
++				if (diggerRequests.size() > 1) {
++					diggerRequests.offer(diggerRequests.poll());
++				}
++				return;
++			}
++
+ 			IManageableDigger digger = joblessDiggers.removeObjectNextTo(request.getPosition());
+ 			if (digger != null) {
+ 				if (digger.setDiggerJob(request.requester)) {
+@@ -452,6 +497,11 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 	private void handleBricklayerRequest() {
+ 		BricklayerRequest bricklayerRequest = bricklayerRequests.poll();
+ 		if (bricklayerRequest != null && bricklayerRequest.isRequestAlive()) {
++			if (!bricklayerRequest.building.canAcceptBricklayer()) {
++				bricklayerRequests.offerLast(bricklayerRequest); // the construction site has all the bricklayers it may have (limit)
++				return;
++			}
++
+ 			IManageableBricklayer bricklayer = joblessBricklayers.removeObjectNextTo(bricklayerRequest.getPosition());
+ 			if (bricklayer != null) {
+ 				if (!bricklayer.setBricklayerJob(bricklayerRequest.building, bricklayerRequest.bricklayerTargetPos, bricklayerRequest.direction)) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBricklayer.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBricklayer.java
+index 9f702ced5..0a9c7e3b1 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBricklayer.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableBricklayer.java
+@@ -32,4 +32,10 @@ public interface IManageableBricklayer extends IManageable {
+ 	boolean setBricklayerJob(IConstructableBuilding constructionSite, ShortPoint2D bricklayerTargetPos, EDirection direction);
+ 
+ 	void convertToBearer();
++
++	/**
++	 * Takes the bricklayer away from its construction site (the limit of bricklayers of the site has been reduced). The bricklayer is jobless
++	 * afterwards.
++	 */
++	void releaseConstructionJob();
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableDigger.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableDigger.java
+index ba26c93b6..c0125aa8e 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableDigger.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/IManageableDigger.java
+@@ -28,4 +28,9 @@ public interface IManageableDigger extends IManageable {
+ 	boolean setDiggerJob(IDiggerRequester requester);
+ 
+ 	void convertToBearer();
++
++	/**
++	 * Takes the digger away from its construction site (the limit of diggers of the site has been reduced). The digger is jobless afterwards.
++	 */
++	void releaseDiggerJob();
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IConstructableBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IConstructableBuilding.java
+index 43e776aff..2fa47a7ae 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IConstructableBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IConstructableBuilding.java
+@@ -15,6 +15,7 @@
+ package jsettlers.logic.map.grid.partition.manager.manageables.interfaces;
+ 
+ import jsettlers.common.buildings.BuildingVariant;
++import jsettlers.logic.map.grid.partition.manager.manageables.IManageableBricklayer;
+ import jsettlers.common.movable.EDirection;
+ import jsettlers.common.player.IPlayerable;
+ import jsettlers.common.position.ShortPoint2D;
+@@ -27,4 +28,19 @@ public interface IConstructableBuilding extends IPlayerable {
+ 	boolean isBricklayerRequestActive();
+ 
+ 	void bricklayerRequestFailed(ShortPoint2D bricklayerTargetPos, EDirection lookDirection);
++
++	/**
++	 * @return true if another bricklayer may work on this site (the limit of bricklayers is not reached).
++	 */
++	default boolean canAcceptBricklayer() {
++		return true;
++	}
++
++	/** Called when a bricklayer starts working on this site. */
++	default void bricklayerAssigned(IManageableBricklayer bricklayer) {
++	}
++
++	/** Called when a bricklayer stops working on this site. */
++	default void bricklayerReleased(IManageableBricklayer bricklayer) {
++	}
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IDiggerRequester.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IDiggerRequester.java
+index 772741027..48c2896fa 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IDiggerRequester.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/manageables/interfaces/IDiggerRequester.java
+@@ -15,6 +15,7 @@
+ package jsettlers.logic.map.grid.partition.manager.manageables.interfaces;
+ 
+ import jsettlers.common.buildings.BuildingVariant;
++import jsettlers.logic.map.grid.partition.manager.manageables.IManageableDigger;
+ import jsettlers.common.position.ILocatable;
+ 
+ /**
+@@ -45,4 +46,19 @@ public interface IDiggerRequester extends ILocatable {
+ 	byte getAverageHeight();
+ 
+ 	void diggerRequestFailed();
++
++	/**
++	 * @return true if another digger may work for this requester (the limit of diggers is not reached).
++	 */
++	default boolean canAcceptDigger() {
++		return true;
++	}
++
++	/** Called when a digger starts working for this requester. */
++	default void diggerAssigned(IManageableDigger digger) {
++	}
++
++	/** Called when a digger stops working for this requester. */
++	default void diggerReleased(IManageableDigger digger) {
++	}
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/ProfessionTargetRequest.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/ProfessionTargetRequest.java
+new file mode 100644
+index 000000000..5a31b45b2
+--- /dev/null
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/objects/ProfessionTargetRequest.java
+@@ -0,0 +1,53 @@
++/*
++ * Copyright (c) 2018
++ *
++ * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
++ * to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
++ * and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
++ *
++ * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
++ *
++ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
++ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
++ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
++ * DEALINGS IN THE SOFTWARE.
++ */
++package jsettlers.logic.map.grid.partition.manager.objects;
++
++import java.io.Serializable;
++
++import jsettlers.common.movable.EMovableType;
++import jsettlers.common.position.ILocatable;
++import jsettlers.common.position.ShortPoint2D;
++
++/**
++ * A request for a new digger or bricklayer that is not made by a building, but by the absolute number the player has set in the settlers'
++ * profession settings. It lets free settlers become diggers / bricklayers (and the tool smithy produce the tools) until this number is reached,
++ * even when no construction site needs a worker at the moment.
++ */
++public final class ProfessionTargetRequest extends WorkerCreationRequest implements ILocatable, Serializable {
++	private static final long serialVersionUID = 5163921530474581071L;
++
++	private final EMovableType movableType;
++	private final ShortPoint2D position;
++
++	public ProfessionTargetRequest(EMovableType movableType, ShortPoint2D position) {
++		this.movableType = movableType;
++		this.position = position;
++	}
++
++	@Override
++	public ShortPoint2D getPosition() {
++		return position;
++	}
++
++	@Override
++	public boolean isRequestAlive() {
++		return true; // the partition manager removes the request when the number is not wanted any more
++	}
++
++	@Override
++	public EMovableType requestedMovableType() {
++		return movableType;
++	}
++}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/settings/ProfessionSettings.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/settings/ProfessionSettings.java
+index 640cd1d9b..3e44ecf3c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/settings/ProfessionSettings.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/settings/ProfessionSettings.java
+@@ -118,6 +118,11 @@ public class ProfessionSettings implements Serializable, IProfessionSettings {
+ 			newSettings = new RelativeProfessionLimit(this, currentSettings);
+ 		} else {
+ 			newSettings = new AbsoluteProfessionLimit(this, currentSettings);
++			if (currentSettings.isRelative() && movableType != EMovableType.BEARER) {
++				// Keep the real number of diggers / bricklayers. The number calculated from the percentage can be much higher (the percentage is only
++				// reached when many buildings are under construction), and then the number would jump when the player switches to absolute numbers.
++				newSettings.setLimit(currentSettings.getCurrentCount(), false);
++			}
+ 		}
+ 
+ 		switch (movableType) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BricklayerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BricklayerMovable.java
+index c9ab5e5a7..5c4f40049 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BricklayerMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/BricklayerMovable.java
+@@ -59,6 +59,9 @@ public class BricklayerMovable extends CivilianMovable implements IManageableBri
+ 				),
+ 				guard(mov -> !mov.registered,
+ 					action(mov -> {
++						if (mov.constructionSite != null) {
++							mov.constructionSite.bricklayerReleased(mov);
++						}
+ 						mov.constructionSite = null;
+ 						mov.registered = true;
+ 						mov.grid.addJobless(mov);
+@@ -75,6 +78,7 @@ public class BricklayerMovable extends CivilianMovable implements IManageableBri
+ 			this.targetPosition = bricklayerTargetPos;
+ 			this.lookDirection = direction;
+ 			registered = false;
++			constructionSite.bricklayerAssigned(this);
+ 			return true;
+ 		} else {
+ 			return false;
+@@ -96,8 +100,20 @@ public class BricklayerMovable extends CivilianMovable implements IManageableBri
+ 		grid.removeJobless(this);
+ 	}
+ 
++	@Override
++	public void releaseConstructionJob() {
++		if (constructionSite != null) {
++			IConstructableBuilding oldSite = constructionSite;
++			constructionSite = null; // the behaviour registers the bricklayer as jobless
++			oldSite.bricklayerRequestFailed(targetPosition, lookDirection);
++		}
++	}
++
+ 	@Override
+ 	protected void abortJob() {
+-		if(constructionSite != null) constructionSite.bricklayerRequestFailed(targetPosition, lookDirection);
++		if(constructionSite != null) {
++			constructionSite.bricklayerReleased(this);
++			constructionSite.bricklayerRequestFailed(targetPosition, lookDirection);
++		}
+ 	}
+ }
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/DiggerMovable.java b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/DiggerMovable.java
+index 2ecc1df3e..047542ed4 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/DiggerMovable.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/movable/civilian/DiggerMovable.java
+@@ -60,6 +60,9 @@ public class DiggerMovable extends CivilianMovable implements IManageableDigger
+ 				),
+ 				guard(mov -> !mov.registered,
+ 					action(mov -> {
++						if (mov.requester != null) {
++							mov.requester.diggerReleased(mov);
++						}
+ 						mov.requester = null;
+ 						mov.registered = true;
+ 						mov.grid.addJobless(mov);
+@@ -85,6 +88,7 @@ public class DiggerMovable extends CivilianMovable implements IManageableDigger
+ 		if (this.requester == null) {
+ 			this.requester = requester;
+ 			registered = false;
++			requester.diggerAssigned(this);
+ 			return true;
+ 		} else {
+ 			return false;
+@@ -144,11 +148,21 @@ public class DiggerMovable extends CivilianMovable implements IManageableDigger
+ 		return grid.getHeightAt(pos) != requester.getAverageHeight();
+ 	}
+ 
++	@Override
++	public void releaseDiggerJob() {
++		if (requester != null) {
++			requester.diggerReleased(this);
++			requester = null; // the behaviour registers the digger as jobless
++		}
++	}
++
+ 	@Override
+ 	protected void abortJob() {
+ 		if(requester != null) {
+-			requester.diggerRequestFailed();
++			IDiggerRequester oldRequester = requester;
+ 			requester = null;
++			oldRequester.diggerReleased(this);
++			oldRequester.diggerRequestFailed();
+ 		}
+ 	}
+ }

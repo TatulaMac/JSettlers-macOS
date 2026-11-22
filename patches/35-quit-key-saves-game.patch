@@ -1,0 +1,96 @@
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+index b03c6e613..74508837a 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/action/EActionType.java
+@@ -44,6 +44,11 @@ public enum EActionType {
+ 	 */
+ 	FIND_BUILDING,
+ 
++	/**
++	 * Saves the game and leaves it after that (key Q). A second request leaves the game at once.
++	 */
++	SAVE_AND_EXIT,
++
+ 	/**
+ 	 * Destroys the selected items.
+ 	 */
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+index d8f5ab56a..40f170725 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/MapContent.java
+@@ -1057,8 +1057,8 @@ public final class MapContent implements RegionContent, IMapInterfaceListener, A
+ 		} else if ("o".equalsIgnoreCase(keyCode)) {
+ 			return new Action(EActionType.TOGGLE_ORIGINAL_GRAPHICS);
+ 		} else if ("q".equalsIgnoreCase(keyCode)) {
+-			// TODO: Only show the exit menu.
+-			return new Action(EActionType.EXIT);
++			// the game is saved before it is left, so a key pressed by accident doesn't lose the game
++			return new Action(EActionType.SAVE_AND_EXIT);
+ 		} else if ("w".equalsIgnoreCase(keyCode)) {
+ 			return new Action(EActionType.TOGGLE_FOG_OF_WAR);
+ 		} else if ("z".equalsIgnoreCase(keyCode)) {
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+index 79720821b..e6ff4cf28 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiInterface.java
+@@ -449,6 +449,16 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 				gameStoppable.stopGame();
+ 				break;
+ 
++			case SAVE_AND_EXIT:
++				if (exitAfterSave) {
++					// second request (the saving did not finish, e.g. the game is paused): leave at once
++					gameStoppable.stopGame();
++				} else {
++					exitAfterSave = true;
++					taskScheduler.scheduleTask(new SimpleGuiTask(EGuiAction.QUICK_SAVE, playerId));
++				}
++				break;
++
+ 			case MAKE_FERRY:
+ 				orderShip(EShipType.FERRY);
+ 				break;
+@@ -953,6 +963,16 @@ public class GuiInterface implements IMapInterfaceListener, ITaskExecutorGuiInte
+ 		}
+ 	}
+ 
++	/** true after the key Q was pressed: the game is left as soon as it is saved. */
++	private volatile boolean exitAfterSave = false;
++
++	@Override
++	public void gameSaved() {
++		if (exitAfterSave) {
++			gameStoppable.stopGame();
++		}
++	}
++
+ 	@Override
+ 	public UIState getUIState() {
+ 		return connector.getUIState();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+index 1c68856b6..213308b74 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/GuiTaskExecutor.java
+@@ -318,6 +318,7 @@ class GuiTaskExecutor implements ITaskExecutor {
+ 			if (player != null) {
+ 				player.showMessage(SimpleMessage.gameSaved());
+ 			}
++			guiInterface.gameSaved();
+ 		} catch (IOException | InterruptedException e) {
+ 			e.printStackTrace();
+ 		}
+diff --git a/jsettlers.logic/src/main/java/jsettlers/input/ITaskExecutorGuiInterface.java b/jsettlers.logic/src/main/java/jsettlers/input/ITaskExecutorGuiInterface.java
+index 90529e6c6..d4358921c 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/input/ITaskExecutorGuiInterface.java
++++ b/jsettlers.logic/src/main/java/jsettlers/input/ITaskExecutorGuiInterface.java
+@@ -46,4 +46,10 @@ public interface ITaskExecutorGuiInterface {
+ 	 */
+ 	UIState getUIState();
+ 
++	/**
++	 * Called after the game was saved successfully.
++	 */
++	default void gameSaved() {
++	}
++
+ }

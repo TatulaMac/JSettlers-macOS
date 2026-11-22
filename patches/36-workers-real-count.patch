@@ -1,0 +1,61 @@
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+index 1f44cfa84..c27b2dd3b 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+@@ -492,8 +492,19 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+ 
+ 		private final IBuilding building;
+ 		private final boolean bricklayers;
+-		private final Label label = new Label("", EFontSize.NORMAL);
++		/**
++		 * true: two lines (limit/total, below it (workers on the site)), false: one line with the number of workers on the site in brackets in
++		 * front of the limit, e.g. "(2)4/20".
++		 */
++		private static final boolean TWO_LINES = true;
++		/** Height of the first line in pixels; the digits of the second line start below it (the row is 18 pixels high). */
++		private static final float FIRST_LINE_PX = 9f;
++		private static final float ROW_PX = 18f;
++
++		private final Label label = new Label("", EFontSize.SMALL, Label.EHorizontalAlignment.CENTER, Label.EVerticalAlignment.TOP);
++		private final Label realLabel = new Label("", EFontSize.SMALL, Label.EHorizontalAlignment.CENTER, Label.EVerticalAlignment.TOP);
+ 		private String shownText = null;
++		private String shownRealText = null;
+ 
+ 		public ConstructionWorkersPanel(IBuilding building, boolean bricklayers) {
+ 			this.building = building;
+@@ -508,7 +519,14 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+ 
+ 			float left = 0;
+ 			addChild(icon, left, 0f, left += ICON_WIDTH, 1f);
+-			addChild(label, left, 0f, left += LABEL_WIDTH, 1f);
++			if (TWO_LINES) {
++				// the top of the digits is at the top of the icon, the second line follows right below the first one
++				addChild(label, left, 1f - FIRST_LINE_PX / ROW_PX, left + LABEL_WIDTH, 1f);
++				addChild(realLabel, left, 0f, left + LABEL_WIDTH, 1f - (FIRST_LINE_PX + 0.5f) / ROW_PX);
++				left += LABEL_WIDTH;
++			} else {
++				addChild(label, left, 0f, left += LABEL_WIDTH, 1f);
++			}
+ 			addChild(arrows, left, 0f, left += ARROWS_WIDTH, 1f);
+ 		}
+ 
+@@ -516,7 +534,18 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+ 		public void drawAt(GLDrawContext gl) {
+ 			int total = bricklayers ? building.getTotalBricklayers() : building.getTotalDiggers();
+ 			int limit = Math.min(bricklayers ? building.getBricklayerLimit() : building.getDiggerLimit(), total);
+-			String text = limit + "/" + total;
++			int real = bricklayers ? building.getAssignedBricklayers() : building.getAssignedDiggers();
++			String text;
++			if (TWO_LINES) {
++				text = limit + "/" + total;
++				String realText = "(" + real + ")";
++				if (!realText.equals(shownRealText)) {
++					shownRealText = realText;
++					realLabel.setText(realText);
++				}
++			} else {
++				text = "(" + real + ")" + limit + "/" + total;
++			}
+ 			if (!text.equals(shownText)) {
+ 				shownText = text;
+ 				label.setText(text);

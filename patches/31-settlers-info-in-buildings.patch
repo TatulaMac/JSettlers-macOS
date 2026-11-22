@@ -1,0 +1,218 @@
+diff --git a/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java b/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java
+index e4bbfd89d..31d324948 100644
+--- a/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java
++++ b/jsettlers.common/src/main/java/jsettlers/common/buildings/IBuilding.java
+@@ -64,6 +64,20 @@ public interface IBuilding extends IMapObject, IPlayerable, ISelectable, ILocata
+ 	 */
+ 	boolean isOccupied();
+ 
++	/**
++	 * @return The number of settlers this finished residential building will still send out, -1 for all other buildings.
++	 */
++	default int getSettlersToSpawn() {
++		return -1;
++	}
++
++	/**
++	 * @return The number of free settlers that can become soldiers in this finished barracks, -1 for all other buildings.
++	 */
++	default int getFreeSettlersForSoldiers() {
++		return -1;
++	}
++
+ 	/**
+ 	 * @return The number of diggers that currently work on this construction site.
+ 	 */
+diff --git a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+index d9c051c51..843514fb3 100644
+--- a/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
++++ b/jsettlers.graphics/src/main/java/jsettlers/graphics/map/controls/original/panel/selection/BuildingSelectionContent.java
+@@ -53,6 +53,7 @@ import jsettlers.graphics.map.draw.ImageProvider;
+ import jsettlers.graphics.ui.Button;
+ import jsettlers.graphics.ui.CountArrows;
+ import jsettlers.graphics.ui.Label;
++import jsettlers.graphics.ui.Label.EHorizontalAlignment;
+ import jsettlers.graphics.ui.UIElement;
+ import jsettlers.graphics.ui.UIPanel;
+ import jsettlers.graphics.ui.layout.BuildingSelectionLayout;
+@@ -394,17 +395,73 @@ public class BuildingSelectionContent extends AbstractSelectionContent {
+ 
+ 		if (state.isConstruction()) {
+ 			addConstructionWorkers(layout.background);
++		} else if (building.getSettlersToSpawn() >= 0) {
++			addSettlersInfo(layout.background, true);
++		} else if (building.getFreeSettlersForSoldiers() >= 0) {
++			addSettlersInfo(layout.background, false);
+ 		}
+ 
+ 		return layout._root;
+ 	}
+ 
++	/**
++	 * Adds the line with the settlers that are still coming out of a residential building (it disappears when all are out) or the free settlers
++	 * of a barracks. It uses the same place as the workers of a construction site.
++	 */
++	private void addSettlersInfo(UIPanel background, boolean spawning) {
++		float top = 1 - INFO_TOP_PX / PANEL_HEIGHT_PX;
++		float bottom = top - INFO_HEIGHT_PX / PANEL_HEIGHT_PX;
++		background.addChild(new SettlersInfoPanel(building, spawning), 0f, bottom, 1f, top);
++	}
++
++	/**
++	 * Shows the carrier icon with the number of settlers that will still leave a residential building ("Remaining: n"), or the number of free
++	 * settlers that can be armed in a barracks. The icon is a high rectangle (like in the original menus) and keeps its proportions, the text is
++	 * centered vertically at the middle of the icon.
++	 */
++	public static class SettlersInfoPanel extends UIPanel {
++		private static final float ICON_WIDTH = INFO_ICON_WIDTH_PX / PANEL_WIDTH_PX;
++
++		private final IBuilding building;
++		private final boolean spawning;
++		private final Label label = new Label("", EFontSize.NORMAL, EHorizontalAlignment.LEFT);
++		private String shownText = null;
++
++		public SettlersInfoPanel(IBuilding building, boolean spawning) {
++			this.building = building;
++			this.spawning = spawning;
++
++			UIPanel icon = new UIPanel();
++			icon.setBackground(ImageLinkMap.get(building.getPlayer().getCivilisation(), ECommonLinkType.SETTLER_GUI, EMovableType.BEARER));
++			addChild(icon, 0.03f, 0f, 0.03f + ICON_WIDTH, 1f);
++			addChild(label, 0.05f + ICON_WIDTH, 0f, 1f, 1f);
++		}
++
++		@Override
++		public void drawAt(GLDrawContext gl) {
++			int count = spawning ? building.getSettlersToSpawn() : building.getFreeSettlersForSoldiers();
++			if (count < 0 || (spawning && count == 0)) {
++				return; // all settlers are out of the house
++			}
++			String text = Labels.getString(spawning ? "building_settlers_remaining" : "building_free_settlers", count);
++			if (!text.equals(shownText)) {
++				shownText = text;
++				label.setText(text);
++			}
++			super.drawAt(gl);
++		}
++	}
++
+ 	/** Size of the panel of the building (see BuildingSelectionLayout.xml) in pixels. */
+ 	private static final float PANEL_WIDTH_PX = 127 - 9;
+ 	private static final float PANEL_HEIGHT_PX = 435 - 219;
+ 	/** The row with the workers of a construction site: between the picture of the building and the required materials. */
+ 	private static final float WORKERS_TOP_PX = 360 - 219;
+ 	private static final float WORKERS_HEIGHT_PX = 18;
++	/** The line with the settlers of a finished residential building / barracks: the icon is a high rectangle (about 9:16). */
++	private static final float INFO_TOP_PX = 352 - 219;
++	private static final float INFO_HEIGHT_PX = 26;
++	private static final float INFO_ICON_WIDTH_PX = 14.6f;
+ 
+ 	/**
+ 	 * Adds the numbers of diggers and bricklayers (working / limit) of a construction site with the arrows to change the limits.
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+index 155922671..56f93c4dc 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_cs.properties
+@@ -636,3 +636,5 @@ settings-hd-graphics-restart-short = Změna se projeví po restartu hry.
+ hd-graphics-title = HD grafika
+ hd-graphics-preparing = Zvětšuji původní grafiku (jen poprvé) ...
+ hd-graphics-remaining = zbývá asi %d min
++building_settlers_remaining = Zbývá: %d
++building_free_settlers = Volní osadníci: %d
+diff --git a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+index 3bfdb7197..63c977cfd 100644
+--- a/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
++++ b/jsettlers.graphics/src/main/resources/jsettlers/graphics/localization/labels_en.properties
+@@ -642,3 +642,5 @@ settings-hd-graphics-restart-short = The change is applied after the game is res
+ hd-graphics-title = HD graphics
+ hd-graphics-preparing = Enlarging the original graphics (only the first time) ...
+ hd-graphics-remaining = about %d min left
++building_settlers_remaining = Remaining: %d
++building_free_settlers = Free settlers: %d
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/IBuildingsGrid.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/IBuildingsGrid.java
+index 2299b30d2..a91ee6bac 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/IBuildingsGrid.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/IBuildingsGrid.java
+@@ -92,6 +92,11 @@ public interface IBuildingsGrid {
+ 
+ 	void requestSoldierable(IBarrack barrack);
+ 
++	/**
++	 * @return The number of free settlers in the partition of the given barracks that could become soldiers.
++	 */
++	int getFreeSettlersForSoldiers(IBarrack barrack);
++
+ 	void setBlocked(FreeMapArea buildingArea, boolean blocked);
+ 
+ 	void removeBuildingAt(ShortPoint2D pos);
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java
+index 7045270c8..aac438a90 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/military/Barrack.java
+@@ -83,6 +83,11 @@ public final class Barrack extends WorkAreaBuilding implements IBarrack, IReques
+ 	private static final int WARNING_REPEAT = 120 * 1000;
+ 	private int nextWarningTime = 0;
+ 
++	@Override
++	public int getFreeSettlersForSoldiers() {
++		return isConstructionFinished() ? super.grid.getFreeSettlersForSoldiers(this) : -1;
++	}
++
+ 	@Override
+ 	public void warnNoFreeSettler() {
+ 		int now = MatchConstants.clock().getTime();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/spawn/SpawnBuilding.java b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/spawn/SpawnBuilding.java
+index be3b121fe..09527d5d1 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/buildings/spawn/SpawnBuilding.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/buildings/spawn/SpawnBuilding.java
+@@ -82,6 +82,14 @@ public abstract class SpawnBuilding extends Building {
+ 
+ 	protected abstract byte getProduceLimit();
+ 
++	@Override
++	public int getSettlersToSpawn() {
++		if (getMovableType() != EMovableType.BEARER || !isConstructionFinished()) {
++			return -1;
++		}
++		return Math.max(0, getProduceLimit() - produced);
++	}
++
+ 	@Override
+ 	public boolean cannotWork() {
+ 		return produced >= getProduceLimit();
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
+index 71e7c4054..698d9a780 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/MainGrid.java
+@@ -1940,6 +1940,11 @@ public final class MainGrid implements Serializable {
+ 			partitionsGrid.getPartitionAt(barrack).requestSoldierable(barrack);
+ 		}
+ 
++		@Override
++		public final int getFreeSettlersForSoldiers(IBarrack barrack) {
++			return partitionsGrid.getPartitionAt(barrack).getFreeSettlersForSoldiers();
++		}
++
+ 		@Override
+ 		public final DijkstraAlgorithm getDijkstra() {
+ 			return movablePathfinderGrid.dijkstra;
+diff --git a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+index 4f66692cd..227ddb2fe 100644
+--- a/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
++++ b/jsettlers.logic/src/main/java/jsettlers/logic/map/grid/partition/manager/PartitionManager.java
+@@ -446,6 +446,15 @@ public abstract class PartitionManager implements IScheduledTimerable, Serializa
+ 		}
+ 	}
+ 
++	/**
++	 * @return The number of free settlers that can become soldiers: the free settlers that are not reserved by the minimum number of carriers.
++	 */
++	public int getFreeSettlersForSoldiers() {
++		float remaining = settings.getProfessionSettings().getSettings(EMovableType.BEARER).getRemainingAmount();
++		int notReserved = remaining > -1 ? 0 : (int) Math.floor(-remaining);
++		return Math.min(joblessBearer.size(), notReserved);
++	}
++
+ 	@Override
+ 	public void soldierCreationFulfilled() {
+ 		settings.getProfessionSettings().applyBearerConversion(EMovableType.SWORDSMAN_L1);
